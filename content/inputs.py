@@ -1,189 +1,132 @@
-from pyswitch.clients.kemper.actions.amp import AMP_GAIN
-from pyswitch.clients.kemper.actions.tempo import TAP_TEMPO
-from pyswitch.clients.kemper.actions.tempo import SHOW_TEMPO
-from pyswitch.clients.kemper.actions.effect_state import EFFECT_STATE
-from pyswitch.clients.kemper.actions.bank_up_down import BANK_UP
-from pyswitch.clients.kemper.actions.bank_up_down import BANK_DOWN
-from pyswitch.clients.kemper.actions.rig_select import RIG_SELECT
-from pyswitch.clients.kemper.actions.tuner import TUNER_MODE
-from pyswitch.clients.local.actions.encoder_button import ENCODER_BUTTON
-from pyswitch.clients.kemper.actions.rig_select import RIG_SELECT_DISPLAY_TARGET_RIG
-from pyswitch.clients.kemper import KemperEffectSlot
-from display import DISPLAY_HEADER_1
-from display import DISPLAY_HEADER_2
-from display import DISPLAY_FOOTER_1
-from display import DISPLAY_FOOTER_2
-from display import DISPLAY_RIG_NAME
-from pyswitch.hardware.devices.pa_midicaptain_10 import *
+##############################################################################
+#
+# Ultra8 NANO4 — Button input definitions.
+#
+# Maps the four NANO4 footswitches to Ultra8 CC commands.
+# MIDI channel is read from ultra8_config.DEFAULT_CHANNEL so this file
+# is identical across all physical devices.
+#
+# Button layout (top view of NANO4):
+#
+#   [ 1 - back-left  ]  [ 2 - back-right ]
+#   [ A - front-left ]  [ B - front-right]
+#
+# CC assignments (ground truth: nano4config/page0.txt):
+#
+#   Switch A  short  → CC 20  REC/PLY      (record/play/overdub)
+#   Switch A  long   → CC 21  CLR          (clear lane)
+#   Switch 1  short  → CC 22  PLY/STP      (play/stop toggle)
+#   Switch 1  long   → CC 23  MON          (toggle monitor/speaker)
+#   Switch 2  short  → CC 25  STOP-LANE    (stop this lane)
+#   Switch B  short  → CC 24  UNDO         (undo last record)
+#
+# B long and 2 long are reserved (not assigned) in this release.
+#
+# Press behaviour: messages fire on SHORT RELEASE (not on physical
+# press-down). When a button has both `actions` and `actionsHold`,
+# PySwitch delays firing `actions` until it confirms the press was
+# short, so the correct CC fires even for adjacent short/long gestures.
+# Value 127 is sent on activation; no release (value 0) message is sent,
+# matching the stock nano4config behaviour.
+#
+##############################################################################
 
-_accept = ENCODER_BUTTON()
+from pyswitch.hardware.devices.pa_midicaptain_nano_4 import *
+from pyswitch.clients.local.actions.custom import CUSTOM_MESSAGE
+from pyswitch.colors import Colors
+from display import DISPLAY_HEADER_1, DISPLAY_HEADER_2, DISPLAY_FOOTER_1, DISPLAY_FOOTER_2
+from ultra8_config import DEFAULT_CHANNEL
 
-_cancel = ENCODER_BUTTON()
+# ── MIDI helpers ─────────────────────────────────────────────────────────────
+
+# Control Change status byte for the configured lane channel (0xB0 = ch1).
+_CC_STATUS = 0xB0 + (DEFAULT_CHANNEL - 1)
+
+def _cc(number):
+    """Return raw CC bytes [status, cc_number, 127] for the device's lane channel."""
+    return [_CC_STATUS, number, 127]
+
+
+# ── Inputs ───────────────────────────────────────────────────────────────────
 
 Inputs = [
+
+    # ── Switch 1 (back-left) ─────────────────────────────────────────────────
+    # Short: PLY/STP (CC22)   Long: MON (CC23)
     {
-        "assignment": PA_MIDICAPTAIN_10_WHEEL_ENCODER,
+        "assignment": PA_MIDICAPTAIN_NANO_SWITCH_1,
         "actions": [
-            AMP_GAIN(
-                accept_action = _accept, 
-                cancel_action = _cancel, 
-                preview_display = DISPLAY_RIG_NAME, 
-                step_width = 40
+            CUSTOM_MESSAGE(
+                message        = _cc(22),
+                text           = "PLY/STP",
+                color          = Colors.LIGHT_GREEN,
+                led_brightness = 0.3,
+                display        = DISPLAY_HEADER_1,
             ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_1,
-        "actions": [
-            EFFECT_STATE(
-                slot_id = KemperEffectSlot.EFFECT_SLOT_ID_A, 
-                display = DISPLAY_HEADER_1
-            ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_2,
-        "actions": [
-            EFFECT_STATE(
-                slot_id = KemperEffectSlot.EFFECT_SLOT_ID_B, 
-                display = DISPLAY_HEADER_2
-            ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_3,
-        "actions": [
-            EFFECT_STATE(
-                slot_id = KemperEffectSlot.EFFECT_SLOT_ID_C, 
-                display = DISPLAY_FOOTER_1
-            ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_4,
-        "actions": [
-            EFFECT_STATE(
-                slot_id = KemperEffectSlot.EFFECT_SLOT_ID_D, 
-                display = DISPLAY_FOOTER_2
-            ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_UP,
-        "actions": [
-            TAP_TEMPO(
-                use_leds = False
-            ),
-            SHOW_TEMPO(
-                change_display = DISPLAY_RIG_NAME, 
-                text = '{bpm} bpm'
-            ),
-            
         ],
         "actionsHold": [
-            TUNER_MODE(
-                use_leds = False, 
-                text = 'Tuner'
+            CUSTOM_MESSAGE(
+                message        = _cc(23),
+                text           = "MON",
+                color          = Colors.BLUE,
+                led_brightness = 0.3,
+                display        = DISPLAY_HEADER_1,
             ),
-            
         ],
-        
     },
+
+    # ── Switch 2 (back-right) ────────────────────────────────────────────────
+    # Short: STOP-LANE (CC25)   Long: reserved
     {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_A,
-        "actionsHold": [
-            BANK_DOWN(
-                display_mode = RIG_SELECT_DISPLAY_TARGET_RIG, 
-                text = 'Bank dn'
-            ),
-            
-        ],
+        "assignment": PA_MIDICAPTAIN_NANO_SWITCH_2,
         "actions": [
-            RIG_SELECT(
-                rig = 1, 
-                display_mode = RIG_SELECT_DISPLAY_TARGET_RIG
+            CUSTOM_MESSAGE(
+                message        = _cc(25),
+                text           = "STOP",
+                color          = Colors.ORANGE,
+                led_brightness = 0.3,
+                display        = DISPLAY_HEADER_2,
             ),
-            
         ],
-        
     },
+
+    # ── Switch A (front-left) ────────────────────────────────────────────────
+    # Short: REC/PLY (CC20)   Long: CLR (CC21)
     {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_B,
+        "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
         "actions": [
-            RIG_SELECT(
-                rig = 2, 
-                display_mode = RIG_SELECT_DISPLAY_TARGET_RIG
+            CUSTOM_MESSAGE(
+                message        = _cc(20),
+                text           = "REC/PLY",
+                color          = Colors.RED,
+                led_brightness = 0.3,
+                display        = DISPLAY_FOOTER_1,
             ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_C,
-        "actions": [
-            RIG_SELECT(
-                rig = 3, 
-                display_mode = RIG_SELECT_DISPLAY_TARGET_RIG
-            ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_D,
-        "actions": [
-            RIG_SELECT(
-                rig = 4, 
-                display_mode = RIG_SELECT_DISPLAY_TARGET_RIG
-            ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_SWITCH_DOWN,
-        "actionsHold": [
-            BANK_UP(
-                display_mode = RIG_SELECT_DISPLAY_TARGET_RIG, 
-                text = 'Bank up'
-            ),
-            
-        ],
-        "actions": [
-            RIG_SELECT(
-                rig = 5, 
-                display_mode = RIG_SELECT_DISPLAY_TARGET_RIG
-            ),
-            
-        ],
-        
-    },
-    {
-        "assignment": PA_MIDICAPTAIN_10_WHEEL_BUTTON,
-        "actions": [
-            _accept,
-            
         ],
         "actionsHold": [
-            _cancel,
-            
+            CUSTOM_MESSAGE(
+                message        = _cc(21),
+                text           = "CLR",
+                color          = Colors.PURPLE,
+                led_brightness = 0.3,
+                display        = DISPLAY_FOOTER_1,
+            ),
         ],
-        
     },
+
+    # ── Switch B (front-right) ───────────────────────────────────────────────
+    # Short: UNDO (CC24)   Long: reserved
     {
-        "assignment": PA_MIDICAPTAIN_10_EXP_PEDAL_1,
-        "actions": [],
-        
+        "assignment": PA_MIDICAPTAIN_NANO_SWITCH_B,
+        "actions": [
+            CUSTOM_MESSAGE(
+                message        = _cc(24),
+                text           = "UNDO",
+                color          = Colors.YELLOW,
+                led_brightness = 0.3,
+                display        = DISPLAY_FOOTER_2,
+            ),
+        ],
     },
-    
+
 ]
