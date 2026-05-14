@@ -1,64 +1,66 @@
 ##############################################################################
 #
-# Ultra8 PySwitch — ULTRA8_LANE_STATE action (Unit 2.3 / 2.4)
+# Ultra8 PySwitch — ULTRA8_LANE_STATE action (Units 2.3 / 2.4 / 3.7)
 #
 # Combines two behaviours in one action:
 #
 #   SEND: on button press, sends a raw CC byte sequence to Ultra8 (same as
 #         CUSTOM_MESSAGE).
 #
-#   RECEIVE: registers a persistent listener for the Ultra8 debug feedback CC
-#            (CC 100+lane on MIDI channel 16).  When the CC arrives, decodes
-#            the packed state byte and updates:
+#   RECEIVE (Unit 3.7): polls protocol.snapshot each display cycle instead
+#         of the Unit 2.x debug CC (CC 100+lane, channel 16).  Looks up the
+#         lane block for this device's configured lane and decodes:
 #              • the button LED colour / brightness
 #              • DISPLAY_STATUS text and colour (if available)
 #
-# Encoding (set by Ultra8's @block debug emitter, Unit 2.2):
-#   CC value = (st_state * 8) + (st_dirty > 0 ? 4 : 0) + st_monmode
-#   st_state : 0=stopped, 1=playing, 2=recording/overdub
-#   st_dirty : boolean — lane has recorded content
-#   st_monmode: 0/1/2 (not used for LED colour in this milestone)
+#         Stale detection reads protocol.last_feedback_ms (set by the SysEx
+#         parser on every accepted snapshot) rather than tracking CC arrivals
+#         locally.
+#
+# Lane state enum (from protocol_sysex_v0_1.md):
+#   0 = STOPPED     — no audio recorded, or stopped
+#   1 = PLAYING     — loop is running
+#   2 = RECORDING   — first-pass record (loop length not yet set)
+#   3 = OVERDUBBING — overdub on an existing loop
 #
 # LED colours:
-#   Recording  → RED
-#   Playing    → LIGHT_GREEN
-#   Stopped with content → dim BLUE
-#   Empty      → off (BLACK)
-#   Waiting / stale (no feedback yet, or timed out) → dim GRAY
+#   RECORDING   → RED
+#   OVERDUBBING → ORANGE   (distinct from first-record RED)
+#   PLAYING     → LIGHT_GREEN
+#   Stopped, content present  → dim BLUE
+#   Stopped, empty            → near-off (BLACK)
+#   Waiting / stale           → dim GRAY
 #
-# Stale detection (Unit 2.4):
-#   parameter_changed() stamps __last_feedback_ms on every received CC.
-#   update_displays() checks elapsed time each cycle; if it exceeds
-#   FEEDBACK_TIMEOUT_MS (from ultra8_config) the LED and status bar revert
-#   to the waiting state automatically.  They recover on the next CC.
-#
-# Must match Ultra8 JSFX constants:
-#   g_dbg_fb_cc_base = 100   (CC 100+lane)
-#   g_dbg_fb_chan    = 15    (0-indexed → MIDI channel 16)
+# Stale detection (Unit 2.4, extended in 3.7):
+#   update_displays() reads protocol.last_feedback_ms each cycle.  If it is
+#   None (no snapshot ever received) or too old, the LED and status bar revert
+#   to the waiting state automatically.  They recover on the next snapshot.
 #
 ##############################################################################
 
 from ....controller.callbacks import Callback
 from ....controller.actions import Action
-from ....controller.client import ClientParameterMapping
 from ....colors import Colors
 from ....misc import get_current_millis
-from adafruit_midi.control_change import ControlChange
 from adafruit_midi.midi_message import MIDIMessage
 
-# ── Constants (must match Ultra8 JSFX) ───────────────────────────────────────
-_FEEDBACK_CC_BASE = 100   # CC number = _FEEDBACK_CC_BASE + lane_index
-
 # ── LED colours per state ─────────────────────────────────────────────────────
-_COLOR_RECORDING = Colors.RED
-_COLOR_PLAYING   = Colors.LIGHT_GREEN
-_COLOR_STOPPED   = Colors.BLUE          # stopped with recorded content
-_COLOR_EMPTY     = Colors.BLACK         # lane has no content
-_COLOR_WAITING   = Colors.DARK_GRAY     # no feedback received yet (initial)
+_COLOR_RECORDING   = Colors.RED
+_COLOR_OVERDUBBING = Colors.ORANGE
+_COLOR_PLAYING     = Colors.LIGHT_GREEN
+_COLOR_STOPPED     = Colors.BLUE        # stopped with recorded content
+_COLOR_EMPTY       = Colors.BLACK       # lane has no content
+_COLOR_WAITING     = Colors.DARK_GRAY   # no snapshot received / stale
 
 _BRIGHTNESS_ACTIVE  = 0.3
 _BRIGHTNESS_STOPPED = 0.15             # dimmer for stopped-with-content
 _BRIGHTNESS_EMPTY   = 0.02             # near-off for truly empty
+
+# Lane state enum — must match protocol_sysex_v0_1.md and protocol.py
+_STATE_STOPPED    = 0
+_STATE_PLAYING    = 1
+_STATE_RECORDING  = 2
+_STATE_OVERDUBBING = 3
 
 
 # ── Public factory function ───────────────────────────────────────────────────
@@ -103,33 +105,26 @@ class _LaneStateCallback(Callback):
             return self.__data
 
     def __init__(self, lane, message, message_release, text):
-        # Build a response-only mapping so the framework creates a permanent
-        # (non-expiring) listener: no `request` field → lifetime = None.
-        self.__mapping = ClientParameterMapping.get(
-            name     = "Ultra8LaneFB" + str(lane),
-            response = ControlChange(_FEEDBACK_CC_BASE + lane, 0),
-        )
-        super().__init__(mappings = [self.__mapping])
+        # No CC listener — update_displays() polls protocol.snapshot directly.
+        super().__init__(mappings = [])
 
+        self.__lane            = lane
         self.__message         = message
         self.__message_release = message_release
         self.__text            = text
 
-        # Current display state — starts in "waiting" before first feedback
+        # Current display state — starts in "waiting" before first snapshot
         self.__current_color      = _COLOR_WAITING
         self.__current_brightness = _BRIGHTNESS_EMPTY
         self.__status_label       = None
 
-        # Stale detection: timestamp of the last received feedback CC (ms).
-        # None means no feedback has ever arrived this session.
-        self.__last_feedback_ms   = None
         self.__feedback_timeout_ms = None  # loaded from ultra8_config in init()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def init(self, appl, listener = None):
         self.__appl = appl
-        super().init(appl, listener)   # registers mapping with client
+        super().init(appl, listener)
 
         # Late-import DISPLAY_STATUS (display.py loads after communication.py)
         try:
@@ -155,24 +150,27 @@ class _LaneStateCallback(Callback):
         if self.__message_release:
             self.__appl.client.midi.send(self._RawMessage(self.__message_release))
 
-    # ── Feedback receipt (called by the framework when a new CC arrives) ──────
+    # ── Periodic update (called every loop cycle by the framework) ───────────
 
-    def parameter_changed(self, mapping):
-        """Stamp the arrival time so update_displays() can detect staleness."""
-        self.__last_feedback_ms = get_current_millis()
-        super().parameter_changed(mapping)
+    def update(self):
+        # The base Callback.update() calls client.request() for each registered
+        # mapping.  With mappings=[], that is a no-op.  We override here to also
+        # call update_displays() so LED/screen state refreshes every cycle
+        # without waiting for a MIDI event to trigger it.
+        super().update()
+        self.update_displays()
 
-    # ── Display update (called every loop cycle, and on each feedback CC) ─────
+    # ── Display update (called every loop cycle via update(), and on init) ───
 
     def update_displays(self):
+        protocol = self.__appl.client.protocol
+
         # ── Stale check ───────────────────────────────────────────────────────
-        # Feedback is considered stale if no CC has arrived within the timeout.
-        # This covers two cases:
-        #   • __last_feedback_ms is None  → no feedback ever received this session
-        #   • elapsed > timeout           → feedback has stopped arriving
+        # Snapshot is stale if no valid SysEx has arrived within the timeout.
+        last_ms = protocol.last_feedback_ms
         stale = (
-            self.__last_feedback_ms is None or
-            (get_current_millis() - self.__last_feedback_ms) > self.__feedback_timeout_ms
+            last_ms is None or
+            (get_current_millis() - last_ms) > self.__feedback_timeout_ms
         )
 
         if stale:
@@ -183,31 +181,38 @@ class _LaneStateCallback(Callback):
                 self.__status_label.text       = "Waiting for snapshot..."
 
         else:
-            # ── Decode fresh feedback ─────────────────────────────────────────
-            # CC value = state*8 + dirty*4 + monmode
-            v     = self.__mapping.value
-            state = v >> 3          # 0=stopped, 1=playing, 2=recording
-            dirty = (v >> 2) & 1    # 1 = lane has recorded content
+            # ── Decode current lane state from snapshot ───────────────────────
+            lane_block = protocol.snapshot.lanes[self.__lane]
+            state = lane_block.state
+            dirty = lane_block.dirty
 
-            if state == 2:
+            if state == _STATE_RECORDING:
                 self.__current_color      = _COLOR_RECORDING
                 self.__current_brightness = _BRIGHTNESS_ACTIVE
                 status_text  = "REC"
                 status_color = Colors.RED
 
-            elif state == 1:
+            elif state == _STATE_OVERDUBBING:
+                self.__current_color      = _COLOR_OVERDUBBING
+                self.__current_brightness = _BRIGHTNESS_ACTIVE
+                status_text  = "OVDB"
+                status_color = Colors.ORANGE
+
+            elif state == _STATE_PLAYING:
                 self.__current_color      = _COLOR_PLAYING
                 self.__current_brightness = _BRIGHTNESS_ACTIVE
                 status_text  = "PLY"
                 status_color = Colors.LIGHT_GREEN
 
             elif dirty:
+                # STOPPED but has recorded content
                 self.__current_color      = _COLOR_STOPPED
                 self.__current_brightness = _BRIGHTNESS_STOPPED
                 status_text  = "STP"
                 status_color = Colors.DARK_GRAY
 
             else:
+                # STOPPED, no content
                 self.__current_color      = _COLOR_EMPTY
                 self.__current_brightness = _BRIGHTNESS_EMPTY
                 status_text  = "EMPTY"
