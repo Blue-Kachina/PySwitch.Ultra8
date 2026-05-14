@@ -31,7 +31,7 @@ from pyswitch.colors import Colors, DEFAULT_LABEL_COLOR
 from pyswitch.ui.ui import DisplayElement, DisplayBounds
 from pyswitch.ui.elements import DisplayLabel
 from pyswitch.clients.local.callbacks.splashes import SplashesCallback
-from ultra8_config import DEFAULT_CHANNEL
+from ultra8_config import DEFAULT_PAGE
 
 # ── Dimensions ───────────────────────────────────────────────────────────────
 
@@ -108,7 +108,7 @@ Splashes = SplashesCallback(
                 bounds = DisplayBounds(0, 130, _W, 35),
                 layout = {
                     "font":      "/fonts/H20.pcf",
-                    "text":      "Lane " + str(DEFAULT_CHANNEL),
+                    "text":      "Lane " + str(DEFAULT_PAGE),
                     "textColor": Colors.GRAY,
                 },
             ),

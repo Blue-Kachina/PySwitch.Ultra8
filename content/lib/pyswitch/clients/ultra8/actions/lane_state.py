@@ -66,7 +66,7 @@ _STATE_OVERDUBBING = 3
 # ── Public factory function ───────────────────────────────────────────────────
 
 def ULTRA8_LANE_STATE(
-    lane,                   # 0-indexed lane index (DEFAULT_CHANNEL - 1)
+    lane,                   # 0-indexed lane index (DEFAULT_PAGE - 1)
     message,                # Raw bytes sent on short press (NANO4 → Ultra8)
     message_release = None, # Raw bytes sent on release (optional)
     text = "",              # Button label text
@@ -119,6 +119,7 @@ class _LaneStateCallback(Callback):
         self.__status_label       = None
 
         self.__feedback_timeout_ms = None  # loaded from ultra8_config in init()
+        self.__page_label          = ""    # "Lane N: " prefix — set in init()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -136,10 +137,12 @@ class _LaneStateCallback(Callback):
         # Late-import timeout setting from per-device config.
         # Falls back to 5000 ms if ultra8_config is unavailable (e.g. tests).
         try:
-            from ultra8_config import FEEDBACK_TIMEOUT_MS
+            from ultra8_config import FEEDBACK_TIMEOUT_MS, DEFAULT_PAGE
             self.__feedback_timeout_ms = FEEDBACK_TIMEOUT_MS
+            self.__page_label = "Lane " + str(DEFAULT_PAGE) + ": "
         except (ImportError, AttributeError):
             self.__feedback_timeout_ms = 5000
+            self.__page_label = ""
 
     # ── Button press / release ────────────────────────────────────────────────
 
@@ -178,7 +181,7 @@ class _LaneStateCallback(Callback):
             self.__current_brightness = _BRIGHTNESS_EMPTY
             if self.__status_label:
                 self.__status_label.text_color = Colors.DARK_GRAY
-                self.__status_label.text       = "Waiting for snapshot..."
+                self.__status_label.text       = self.__page_label + "Waiting..."
 
         else:
             # ── Decode current lane state from snapshot ───────────────────────
@@ -220,7 +223,7 @@ class _LaneStateCallback(Callback):
 
             if self.__status_label:
                 self.__status_label.text_color = status_color
-                self.__status_label.text       = "Lane: " + status_text
+                self.__status_label.text       = self.__page_label + status_text
 
         # ── Apply to LED and corner label (every cycle) ───────────────────────
         self.action.switch_color      = self.__current_color

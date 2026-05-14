@@ -3,7 +3,7 @@
 # Ultra8 NANO4 — Button input definitions.
 #
 # Maps the four NANO4 footswitches to Ultra8 CC commands.
-# MIDI channel is read from ultra8_config.DEFAULT_CHANNEL so this file
+# MIDI channel is derived from ultra8_config.DEFAULT_PAGE so this file
 # is identical across all physical devices.
 #
 # Button layout (top view of NANO4):
@@ -36,12 +36,12 @@ from pyswitch.clients.local.actions.custom import CUSTOM_MESSAGE
 from pyswitch.clients.ultra8.actions.lane_state import ULTRA8_LANE_STATE
 from pyswitch.colors import Colors
 from display import DISPLAY_HEADER_1, DISPLAY_HEADER_2, DISPLAY_FOOTER_1, DISPLAY_FOOTER_2
-from ultra8_config import DEFAULT_CHANNEL
+from ultra8_config import DEFAULT_PAGE
 
 # ── MIDI helpers ─────────────────────────────────────────────────────────────
 
 # Control Change status byte for the configured lane channel (0xB0 = ch1).
-_CC_STATUS = 0xB0 + (DEFAULT_CHANNEL - 1)
+_CC_STATUS = 0xB0 + (DEFAULT_PAGE - 1)
 
 def _cc(number):
     """Return raw CC bytes [status, cc_number, 127] for the device's lane channel."""
@@ -101,7 +101,7 @@ Inputs = [
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
         "actions": [
             ULTRA8_LANE_STATE(
-                lane    = DEFAULT_CHANNEL - 1,  # 0-indexed (device A = lane 0)
+                lane    = DEFAULT_PAGE - 1,  # 0-indexed (device A = lane 0)
                 message = _cc(20),
                 text    = "REC/PLY",
                 display = DISPLAY_FOOTER_1,
