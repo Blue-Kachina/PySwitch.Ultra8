@@ -18,3 +18,8 @@
 ##############################################################################
 
 DEFAULT_CHANNEL = 1   # Device A: controls Ultra8 Lane 1
+
+# How long (milliseconds) to wait without receiving any feedback CC before
+# reverting the ButtonA LED and status bar to the "waiting" state.
+# 5 seconds is conservative — reduce if the rig sends snapshots more often.
+FEEDBACK_TIMEOUT_MS = 5000

@@ -33,6 +33,7 @@
 
 from pyswitch.hardware.devices.pa_midicaptain_nano_4 import *
 from pyswitch.clients.local.actions.custom import CUSTOM_MESSAGE
+from pyswitch.clients.ultra8.actions.lane_state import ULTRA8_LANE_STATE
 from pyswitch.colors import Colors
 from display import DISPLAY_HEADER_1, DISPLAY_HEADER_2, DISPLAY_FOOTER_1, DISPLAY_FOOTER_2
 from ultra8_config import DEFAULT_CHANNEL
@@ -71,6 +72,9 @@ Inputs = [
                 color          = Colors.BLUE,
                 led_brightness = 0.3,
                 display        = DISPLAY_HEADER_1,
+                use_leds       = False,   # hold action does not own LED pixels;
+                                          # all 3 NeoPixels on Switch 1 belong to
+                                          # the PLY/STP short-press action.
             ),
         ],
     },
@@ -91,16 +95,16 @@ Inputs = [
     },
 
     # ── Switch A (front-left) ────────────────────────────────────────────────
-    # Short: REC/PLY (CC20)   Long: CLR (CC21)
+    # Short: REC/PLY (CC20) — LED driven by Ultra8 feedback, not local state.
+    # Long:  CLR (CC21)
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
         "actions": [
-            CUSTOM_MESSAGE(
-                message        = _cc(20),
-                text           = "REC/PLY",
-                color          = Colors.RED,
-                led_brightness = 0.3,
-                display        = DISPLAY_FOOTER_1,
+            ULTRA8_LANE_STATE(
+                lane    = DEFAULT_CHANNEL - 1,  # 0-indexed (device A = lane 0)
+                message = _cc(20),
+                text    = "REC/PLY",
+                display = DISPLAY_FOOTER_1,
             ),
         ],
         "actionsHold": [
@@ -110,6 +114,9 @@ Inputs = [
                 color          = Colors.PURPLE,
                 led_brightness = 0.3,
                 display        = DISPLAY_FOOTER_1,
+                use_leds       = False,   # CLR hold does not own any LED pixels;
+                                          # all 3 NeoPixels on Switch A belong to
+                                          # ULTRA8_LANE_STATE (feedback-driven).
             ),
         ],
     },
