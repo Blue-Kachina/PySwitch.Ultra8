@@ -70,6 +70,17 @@ DISPLAY_FOOTER_2 = DisplayLabel(           # Switch B, front-right
     bounds = DisplayBounds(_SW,  _FY, _SW, _SH),
 )
 
+# Status label — exported so Ultra8Protocol can update it on incoming MIDI.
+# Initial text: waiting state. Protocol changes this to "RX OK" on first receive.
+DISPLAY_STATUS = DisplayLabel(
+    bounds = DisplayBounds(0, 165, _W, 30),
+    layout = {
+        "font":      "/fonts/H20.pcf",
+        "text":      "Waiting for snapshot...",
+        "textColor": Colors.DARK_GRAY,
+    },
+)
+
 # ── Splash screen ─────────────────────────────────────────────────────────────
 
 Splashes = SplashesCallback(
@@ -102,15 +113,9 @@ Splashes = SplashesCallback(
                 },
             ),
 
-            # Static waiting message — replaced by live callbacks in Milestone 3
-            DisplayLabel(
-                bounds = DisplayBounds(0, 165, _W, 30),
-                layout = {
-                    "font":      "/fonts/H20.pcf",
-                    "text":      "Waiting for snapshot...",
-                    "textColor": Colors.DARK_GRAY,
-                },
-            ),
+            # Status line — updated live by Ultra8Protocol when MIDI is received.
+            # Exported as DISPLAY_STATUS so protocol.py can late-import it.
+            DISPLAY_STATUS,
         ],
     )
 )

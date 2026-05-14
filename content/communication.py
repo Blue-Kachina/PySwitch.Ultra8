@@ -19,6 +19,7 @@
 
 from pyswitch.controller.midi import MidiRouting
 from pyswitch.hardware.devices.pa_midicaptain import PA_MIDICAPTAIN_USB_MIDI
+from pyswitch.clients.ultra8.protocol import Ultra8Protocol
 
 # USB MIDI — connect to a computer for testing.
 # For MOTU routing, replace with:
@@ -30,8 +31,8 @@ _MIDI = PA_MIDICAPTAIN_USB_MIDI(
 )
 
 Communication = {
-    # No "protocol" key: framework uses the default pass-through client.
-    # Ultra8 snapshot protocol will be wired here in Milestone 3.
+    # Ultra8Protocol handles incoming MIDI (test CC for Unit 1.3, SysEx snapshots in Milestone 3).
+    "protocol": Ultra8Protocol(),
 
     "midi": {
         "routings": [
