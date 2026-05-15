@@ -1,28 +1,40 @@
 ##############################################################################
 #
-# Ultra8 NANO4 — Display layout definition.
+# Ultra8 NANO4 — Display layout definition. (Milestone 5 redesign)
 #
 # 240 × 240 TFT layout:
 #
-#   y=  0 ┌──────────────────────────────────┐
-#          │  DISPLAY_HEADER_1  │ DISPLAY_HEADER_2  │  h=40  (back buttons: 1, 2)
-#   y= 40 ├──────────────────────────────────┤
-#          │                                  │
-#          │          ULTRA8                  │  large title
-#          │                                  │
-#          │         Lane N                   │  lane number from config
-#          │                                  │
-#          │     Waiting for snapshot…        │  static until Milestone 3 adds
-#          │                                  │  live snapshot callbacks
-#          │                                  │
-#   y=200 ├──────────────────────────────────┤
-#          │  DISPLAY_FOOTER_1  │ DISPLAY_FOOTER_2  │  h=40  (front buttons: A, B)
-#   y=240 └──────────────────────────────────┘
+#   y=  0 ┌─────────────────────────────────────┐
+#          │  DISPLAY_HEADER_1 │ DISPLAY_HEADER_2 │  h=40  (back buttons: 1, 2)
+#   y= 40 ├─────────────────────────────────────┤
+#          │           Lane N                    │  small gray header  (h=28)
+#          │─────────────────────────────────────│
+#          │                                     │
+#          │           PLY                       │  DISPLAY_STATE: big coloured
+#          │                                     │  state name (h=65)
+#          │─────────────────────────────────────│
+#          │   ████████░░░░░░                    │  DISPLAY_PROGRESS: bar  (h=30)
+#          │─────────────────────────────────────│
+#          │   #42                               │  DISPLAY_SEQ: seq counter (h=28)
+#   y=200 ├─────────────────────────────────────┤
+#          │  DISPLAY_FOOTER_1 │ DISPLAY_FOOTER_2 │  h=40  (front buttons: A, B)
+#   y=240 └─────────────────────────────────────┘
+#
+# Center area breakdown (y=40..200, 160px):
+#   y= 50  h=28  Lane label (static)
+#   y= 78  h=65  DISPLAY_STATE   — updated by lane_state.py (state name, big)
+#   y=143  h=30  DISPLAY_PROGRESS — updated by lane_state.py (ASCII bar)
+#   y=173  h=22  DISPLAY_SEQ     — updated by lane_state.py (seq counter)
+#   Total used: 145px; 15px breathing room before footer.
 #
 # DISPLAY_HEADER_* and DISPLAY_FOOTER_* are exported so inputs.py can
-# attach them to button actions. The center area is static for this
-# milestone; it will become dynamic in Milestone 3 (snapshot parsing)
-# and Milestone 5 (full lane-status UI).
+# attach them to button actions.
+#
+# Font notes:
+#   PTSans-NarrowBold-40.pcf — 40px, used for state name (DISPLAY_STATE).
+#       Short labels (REC / PLY / OVDB / STP / ---) fit comfortably at 240px width.
+#   H20.pcf — 20px, used for lane label, progress bar, seq counter.
+#   Adjust bounds if any font renders taller than expected.
 #
 ##############################################################################
 
@@ -70,13 +82,37 @@ DISPLAY_FOOTER_2 = DisplayLabel(           # Switch B, front-right
     bounds = DisplayBounds(_SW,  _FY, _SW, _SH),
 )
 
-# Status label — exported so Ultra8Protocol can update it on incoming MIDI.
-# Initial text: waiting state. Protocol changes this to "RX OK" on first receive.
-DISPLAY_STATUS = DisplayLabel(
-    bounds = DisplayBounds(0, 165, _W, 30),
+# ── Center dynamic labels (exported for lane_state.py to update) ──────────────
+
+# Primary state name — large, coloured text.
+# Updated by lane_state.py to: "REC", "PLY", "OVDB", "STP", "---", "wait", "ERR"
+DISPLAY_STATE = DisplayLabel(
+    bounds = DisplayBounds(0, 78, _W, 65),
+    layout = {
+        "font":      "/fonts/PTSans-NarrowBold-40.pcf",
+        "text":      "wait",
+        "textColor": Colors.DARK_GRAY,
+    },
+)
+
+# Loop progress bar — ASCII block characters.
+# Updated by lane_state.py when PLAYING or OVERDUBBING; empty otherwise.
+DISPLAY_PROGRESS = DisplayLabel(
+    bounds = DisplayBounds(0, 143, _W, 30),
     layout = {
         "font":      "/fonts/H20.pcf",
-        "text":      "Waiting for snapshot...",
+        "text":      "",
+        "textColor": Colors.DARK_GRAY,
+    },
+)
+
+# Snapshot sequence counter — tiny, dark gray.
+# Updated by lane_state.py to "#N" on each accepted snapshot; empty when stale.
+DISPLAY_SEQ = DisplayLabel(
+    bounds = DisplayBounds(0, 173, _W, 22),
+    layout = {
+        "font":      "/fonts/H20.pcf",
+        "text":      "",
         "textColor": Colors.DARK_GRAY,
     },
 )
@@ -93,19 +129,10 @@ Splashes = SplashesCallback(
             DISPLAY_FOOTER_1,
             DISPLAY_FOOTER_2,
 
-            # "ULTRA8" — large title in the centre
+            # Lane number — static, derived from per-device config.
+            # Identifies which Ultra8 lane this unit controls.
             DisplayLabel(
-                bounds = DisplayBounds(0, 55, _W, 70),
-                layout = {
-                    "font":      "/fonts/PTSans-NarrowBold-40.pcf",
-                    "text":      "ULTRA8",
-                    "textColor": Colors.WHITE,
-                },
-            ),
-
-            # Lane number — derived from per-device config
-            DisplayLabel(
-                bounds = DisplayBounds(0, 130, _W, 35),
+                bounds = DisplayBounds(0, 50, _W, 28),
                 layout = {
                     "font":      "/fonts/H20.pcf",
                     "text":      "Lane " + str(DEFAULT_PAGE),
@@ -113,9 +140,14 @@ Splashes = SplashesCallback(
                 },
             ),
 
-            # Status line — updated live by Ultra8Protocol when MIDI is received.
-            # Exported as DISPLAY_STATUS so protocol.py can late-import it.
-            DISPLAY_STATUS,
+            # Primary state — updated live by lane_state.py
+            DISPLAY_STATE,
+
+            # Loop progress bar — updated live by lane_state.py
+            DISPLAY_PROGRESS,
+
+            # Snapshot sequence counter — updated live by lane_state.py
+            DISPLAY_SEQ,
         ],
     )
 )

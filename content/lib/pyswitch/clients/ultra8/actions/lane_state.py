@@ -1,40 +1,43 @@
 ##############################################################################
 #
-# Ultra8 PySwitch — ULTRA8_LANE_STATE action (Units 2.3 / 2.4 / 3.7)
+# Ultra8 PySwitch — ULTRA8_LANE_STATE action (Units 2.3 / 2.4 / 3.7 / 5.1 / 5.2 / 5.4)
 #
 # Combines two behaviours in one action:
 #
-#   SEND: on button press, sends a raw CC byte sequence to Ultra8 (same as
-#         CUSTOM_MESSAGE).
+#   SEND: on button press, sends a raw CC byte sequence to Ultra8.
 #
-#   RECEIVE (Unit 3.7): polls protocol.snapshot each display cycle instead
-#         of the Unit 2.x debug CC (CC 100+lane, channel 16).  Looks up the
-#         lane block for this device's configured lane and decodes:
-#              • the button LED colour / brightness
-#              • DISPLAY_STATUS text and colour (if available)
-#
-#         Stale detection reads protocol.last_feedback_ms (set by the SysEx
-#         parser on every accepted snapshot) rather than tracking CC arrivals
-#         locally.
+#   RECEIVE: polls protocol.snapshot each display cycle and decodes the lane
+#       block for this device's configured lane:
+#           • LED colour / brightness (Switch A NeoPixels)
+#           • DISPLAY_STATE  — big state name, coloured (Unit 5.2)
+#           • DISPLAY_PROGRESS — ASCII loop-phase bar (Unit 5.4)
+#           • DISPLAY_SEQ    — tiny snapshot sequence counter (Unit 5.2)
 #
 # Lane state enum (from protocol_sysex_v0_1.md):
 #   0 = STOPPED     — no audio recorded, or stopped
 #   1 = PLAYING     — loop is running
 #   2 = RECORDING   — first-pass record (loop length not yet set)
 #   3 = OVERDUBBING — overdub on an existing loop
+#   >3              — unknown/error (future protocol versions)
 #
-# LED colours:
-#   RECORDING   → RED
-#   OVERDUBBING → ORANGE   (distinct from first-record RED)
-#   PLAYING     → LIGHT_GREEN
-#   Stopped, content present  → dim BLUE
-#   Stopped, empty            → near-off (BLACK)
-#   Waiting / stale           → dim GRAY
+# LED colours (Unit 5.1):
+#   RECORDING   → RED          _BRIGHTNESS_ACTIVE
+#   OVERDUBBING → ORANGE       _BRIGHTNESS_ACTIVE
+#   PLAYING     → LIGHT_GREEN  _BRIGHTNESS_ACTIVE
+#   STP w/audio → dim BLUE     _BRIGHTNESS_STOPPED
+#   STP empty   → near-off     _BRIGHTNESS_EMPTY
+#   Unknown/ERR → PURPLE       _BRIGHTNESS_ACTIVE
+#   Waiting     → dim GRAY     _BRIGHTNESS_EMPTY
 #
-# Stale detection (Unit 2.4, extended in 3.7):
-#   update_displays() reads protocol.last_feedback_ms each cycle.  If it is
-#   None (no snapshot ever received) or too old, the LED and status bar revert
-#   to the waiting state automatically.  They recover on the next snapshot.
+# Progress bar (Unit 5.4):
+#   PLAYING / OVERDUBBING → 14-char block bar driven by loop_phase (0–127)
+#   RECORDING             → empty (no loop exists yet)
+#   All other states      → empty
+#
+# Stale detection:
+#   Reads protocol.last_feedback_ms each cycle. Reverts to "wait" state if
+#   None (no snapshot ever received) or older than FEEDBACK_TIMEOUT_MS ms.
+#   Recovers automatically on the next valid snapshot.
 #
 ##############################################################################
 
@@ -51,6 +54,7 @@ _COLOR_PLAYING     = Colors.LIGHT_GREEN
 _COLOR_STOPPED     = Colors.BLUE        # stopped with recorded content
 _COLOR_EMPTY       = Colors.BLACK       # lane has no content
 _COLOR_WAITING     = Colors.DARK_GRAY   # no snapshot received / stale
+_COLOR_ERROR       = Colors.PURPLE      # unknown / out-of-range state enum
 
 _BRIGHTNESS_ACTIVE  = 0.3
 _BRIGHTNESS_STOPPED = 0.15             # dimmer for stopped-with-content
@@ -62,6 +66,19 @@ _STATE_PLAYING    = 1
 _STATE_RECORDING  = 2
 _STATE_OVERDUBBING = 3
 
+# Progress bar (Unit 5.4)
+_BAR_WIDTH = 14   # number of fill characters in the bar
+
+def _make_bar(loop_phase):
+    """Convert loop_phase 0–127 to a 14-char block progress bar.
+
+    Uses Unicode block characters (█ full, ░ light shade).
+    If the font on the device does not support these, substitute ASCII:
+        return "=" * filled + "-" * (_BAR_WIDTH - filled)
+    """
+    filled = max(0, min(_BAR_WIDTH, int(loop_phase / 127 * _BAR_WIDTH)))
+    return "█" * filled + "░" * (_BAR_WIDTH - filled)
+
 
 # ── Public factory function ───────────────────────────────────────────────────
 
@@ -69,15 +86,15 @@ def ULTRA8_LANE_STATE(
     lane,                   # 0-indexed lane index (DEFAULT_PAGE - 1)
     message,                # Raw bytes sent on short press (NANO4 → Ultra8)
     message_release = None, # Raw bytes sent on release (optional)
-    text = "",              # Button label text
+    text = "",              # Button label text (shown in footer corner)
     display = None,         # DisplayLabel for screen corner label
     use_leds = True,
     id = None,
     enable_callback = None,
 ):
     """
-    Action that sends a CC on press and drives its LED purely from Ultra8
-    state feedback — never from local guessing.
+    Action that sends a CC on press and drives its LED/screen purely from
+    Ultra8 snapshot feedback — never from local guessing.
     """
     return Action({
         "callback": _LaneStateCallback(
@@ -113,13 +130,16 @@ class _LaneStateCallback(Callback):
         self.__message_release = message_release
         self.__text            = text
 
-        # Current display state — starts in "waiting" before first snapshot
+        # Current LED state — starts in "waiting" before first snapshot
         self.__current_color      = _COLOR_WAITING
         self.__current_brightness = _BRIGHTNESS_EMPTY
-        self.__status_label       = None
+
+        # Display label references — set in init() via late-import
+        self.__state_label    = None   # DISPLAY_STATE: big state name
+        self.__progress_label = None   # DISPLAY_PROGRESS: ASCII bar
+        self.__seq_label      = None   # DISPLAY_SEQ: snapshot seq counter
 
         self.__feedback_timeout_ms = None  # loaded from ultra8_config in init()
-        self.__page_label          = ""    # "Lane N: " prefix — set in init()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -127,22 +147,21 @@ class _LaneStateCallback(Callback):
         self.__appl = appl
         super().init(appl, listener)
 
-        # Late-import DISPLAY_STATUS (display.py loads after communication.py)
+        # Late-import display labels (display.py loads after communication.py).
         try:
-            from display import DISPLAY_STATUS
-            self.__status_label = DISPLAY_STATUS
-        except ImportError:
+            from display import DISPLAY_STATE, DISPLAY_PROGRESS, DISPLAY_SEQ
+            self.__state_label    = DISPLAY_STATE
+            self.__progress_label = DISPLAY_PROGRESS
+            self.__seq_label      = DISPLAY_SEQ
+        except (ImportError, AttributeError):
             pass   # running without display (tests, emulator, etc.)
 
-        # Late-import timeout setting from per-device config.
-        # Falls back to 5000 ms if ultra8_config is unavailable (e.g. tests).
+        # Late-import timeout from per-device config. Fallback: 5000 ms.
         try:
-            from ultra8_config import FEEDBACK_TIMEOUT_MS, DEFAULT_PAGE
+            from ultra8_config import FEEDBACK_TIMEOUT_MS
             self.__feedback_timeout_ms = FEEDBACK_TIMEOUT_MS
-            self.__page_label = "Lane " + str(DEFAULT_PAGE) + ": "
         except (ImportError, AttributeError):
             self.__feedback_timeout_ms = 5000
-            self.__page_label = ""
 
     # ── Button press / release ────────────────────────────────────────────────
 
@@ -156,20 +175,15 @@ class _LaneStateCallback(Callback):
     # ── Periodic update (called every loop cycle by the framework) ───────────
 
     def update(self):
-        # The base Callback.update() calls client.request() for each registered
-        # mapping.  With mappings=[], that is a no-op.  We override here to also
-        # call update_displays() so LED/screen state refreshes every cycle
-        # without waiting for a MIDI event to trigger it.
         super().update()
         self.update_displays()
 
-    # ── Display update (called every loop cycle via update(), and on init) ───
+    # ── Display update ───────────────────────────────────────────────────────
 
     def update_displays(self):
         protocol = self.__appl.client.protocol
 
         # ── Stale check ───────────────────────────────────────────────────────
-        # Snapshot is stale if no valid SysEx has arrived within the timeout.
         last_ms = protocol.last_feedback_ms
         stale = (
             last_ms is None or
@@ -177,58 +191,90 @@ class _LaneStateCallback(Callback):
         )
 
         if stale:
+            # ── Waiting / no signal ───────────────────────────────────────────
             self.__current_color      = _COLOR_WAITING
             self.__current_brightness = _BRIGHTNESS_EMPTY
-            if self.__status_label:
-                self.__status_label.text_color = Colors.DARK_GRAY
-                self.__status_label.text       = self.__page_label + "Waiting..."
+
+            if self.__state_label:
+                self.__state_label.text_color = Colors.DARK_GRAY
+                self.__state_label.text       = "wait"
+
+            if self.__progress_label:
+                self.__progress_label.text = ""
+
+            if self.__seq_label:
+                self.__seq_label.text = ""
 
         else:
             # ── Decode current lane state from snapshot ───────────────────────
             lane_block = protocol.snapshot.lanes[self.__lane]
-            state = lane_block.state
-            dirty = lane_block.dirty
+            state      = lane_block.state
+            dirty      = lane_block.dirty
+            loop_phase = lane_block.loop_phase
+            seq        = protocol.snapshot.seq
 
+            # Determine LED colour, state label text, and progress bar
             if state == _STATE_RECORDING:
                 self.__current_color      = _COLOR_RECORDING
                 self.__current_brightness = _BRIGHTNESS_ACTIVE
-                status_text  = "REC"
-                status_color = Colors.RED
+                state_text    = "REC"
+                state_color   = Colors.RED
+                progress_text = ""              # no loop yet during first-pass
 
             elif state == _STATE_OVERDUBBING:
                 self.__current_color      = _COLOR_OVERDUBBING
                 self.__current_brightness = _BRIGHTNESS_ACTIVE
-                status_text  = "OVDB"
-                status_color = Colors.ORANGE
+                state_text    = "OVDB"
+                state_color   = Colors.ORANGE
+                progress_text = _make_bar(loop_phase)
 
             elif state == _STATE_PLAYING:
                 self.__current_color      = _COLOR_PLAYING
                 self.__current_brightness = _BRIGHTNESS_ACTIVE
-                status_text  = "PLY"
-                status_color = Colors.LIGHT_GREEN
+                state_text    = "PLY"
+                state_color   = Colors.LIGHT_GREEN
+                progress_text = _make_bar(loop_phase)
 
-            elif dirty:
-                # STOPPED but has recorded content
-                self.__current_color      = _COLOR_STOPPED
-                self.__current_brightness = _BRIGHTNESS_STOPPED
-                status_text  = "STP"
-                status_color = Colors.DARK_GRAY
+            elif state == _STATE_STOPPED:
+                if dirty:
+                    # Stopped, has recorded audio
+                    self.__current_color      = _COLOR_STOPPED
+                    self.__current_brightness = _BRIGHTNESS_STOPPED
+                    state_text    = "STP"
+                    state_color   = Colors.DARK_GRAY
+                else:
+                    # Stopped, lane is empty
+                    self.__current_color      = _COLOR_EMPTY
+                    self.__current_brightness = _BRIGHTNESS_EMPTY
+                    state_text    = "---"
+                    state_color   = Colors.DARK_GRAY
+                progress_text = ""              # stopped = no progress to show
 
             else:
-                # STOPPED, no content
-                self.__current_color      = _COLOR_EMPTY
-                self.__current_brightness = _BRIGHTNESS_EMPTY
-                status_text  = "EMPTY"
-                status_color = Colors.DARK_GRAY
+                # Unknown / out-of-range state enum (future protocol versions)
+                self.__current_color      = _COLOR_ERROR
+                self.__current_brightness = _BRIGHTNESS_ACTIVE
+                state_text    = "ERR"
+                state_color   = Colors.PURPLE
+                progress_text = ""
 
-            if self.__status_label:
-                self.__status_label.text_color = status_color
-                self.__status_label.text       = self.__page_label + status_text
+            # ── Apply to display labels ───────────────────────────────────────
+            if self.__state_label:
+                self.__state_label.text_color = state_color
+                self.__state_label.text       = state_text
 
-        # ── Apply to LED and corner label (every cycle) ───────────────────────
+            if self.__progress_label:
+                self.__progress_label.text = progress_text
+
+            if self.__seq_label:
+                self.__seq_label.text_color = Colors.DARK_GRAY
+                self.__seq_label.text       = "#" + str(seq)
+
+        # ── Apply LED colour to Switch A NeoPixels ────────────────────────────
         self.action.switch_color      = self.__current_color
         self.action.switch_brightness = self.__current_brightness
 
+        # ── Update corner label (DISPLAY_FOOTER_1) ────────────────────────────
         if self.action.label:
             self.action.label.text       = self.__text
             self.action.label.back_color = self.__current_color
