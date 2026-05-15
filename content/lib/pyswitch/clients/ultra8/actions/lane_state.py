@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Ultra8 PySwitch — ULTRA8_LANE_STATE action (Units 2.3 / 2.4 / 3.7 / 5.1 / 5.2 / 5.4)
+# Ultra8 PySwitch — ULTRA8_LANE_STATE action (Units 2.3 / 2.4 / 3.7 / 5.1 / 5.2 / 5.4 / 6.5)
 #
 # Combines two behaviours in one action:
 #
@@ -86,7 +86,8 @@ def ULTRA8_LANE_STATE(
     lane,                   # 0-indexed lane index (DEFAULT_PAGE - 1)
     message,                # Raw bytes sent on short press (NANO4 → Ultra8)
     message_release = None, # Raw bytes sent on release (optional)
-    text = "",              # Button label text (shown in footer corner)
+    control_id = 0,         # Assignment control ID for corner label (0 = REC_PLY)
+    text = "",              # Fallback label text if no assignment message received
     display = None,         # DisplayLabel for screen corner label
     use_leds = True,
     id = None,
@@ -101,6 +102,7 @@ def ULTRA8_LANE_STATE(
             lane            = lane,
             message         = message,
             message_release = message_release,
+            control_id      = control_id,
             text            = text,
         ),
         "display":         display,
@@ -121,14 +123,18 @@ class _LaneStateCallback(Callback):
         def __bytes__(self):
             return self.__data
 
-    def __init__(self, lane, message, message_release, text):
+    def __init__(self, lane, message, message_release, control_id, text):
         # No CC listener — update_displays() polls protocol.snapshot directly.
         super().__init__(mappings = [])
 
         self.__lane            = lane
         self.__message         = message
         self.__message_release = message_release
-        self.__text            = text
+        self.__control_id      = control_id
+        self.__text            = text   # fallback if assignments unavailable
+
+        # assignments module — loaded once in init() to avoid repeated imports.
+        self.__assignments     = None
 
         # Current LED state — starts in "waiting" before first snapshot
         self.__current_color      = _COLOR_WAITING
@@ -155,6 +161,13 @@ class _LaneStateCallback(Callback):
             self.__seq_label      = DISPLAY_SEQ
         except (ImportError, AttributeError):
             pass   # running without display (tests, emulator, etc.)
+
+        # Late-import shared assignment store (Unit 6.5).
+        try:
+            from pyswitch.clients.ultra8 import assignments
+            self.__assignments = assignments
+        except ImportError:
+            pass   # running without the Ultra8 client
 
         # Late-import timeout from per-device config. Fallback: 5000 ms.
         try:
@@ -275,6 +288,12 @@ class _LaneStateCallback(Callback):
         self.action.switch_brightness = self.__current_brightness
 
         # ── Update corner label (DISPLAY_FOOTER_1) ────────────────────────────
+        # Unit 6.5: read dynamic label from assignment store; fall back to
+        # the static text= param if the store is unavailable.
         if self.action.label:
-            self.action.label.text       = self.__text
+            if self.__assignments is not None:
+                corner_text = self.__assignments.get_label(self.__control_id)
+            else:
+                corner_text = self.__text
+            self.action.label.text       = corner_text
             self.action.label.back_color = self.__current_color

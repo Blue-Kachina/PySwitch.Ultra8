@@ -13,12 +13,12 @@
 #
 # CC assignments (ground truth: nano4config/page0.txt):
 #
-#   Switch A  short  → CC 20  REC/PLY      (record/play/overdub)
+#   Switch A  short  → CC 20  REC          (record/play/overdub)
 #   Switch A  long   → CC 21  CLR          (clear lane)
-#   Switch 1  short  → CC 22  PLY/STP      (play/stop toggle)
+#   Switch 1  short  → CC 22              (label driven by Ultra8 assignment)
 #   Switch 1  long   → CC 23  MON          (toggle monitor/speaker)
 #   Switch 2  short  → CC 25  STOP-LANE    (stop this lane)
-#   Switch B  short  → CC 24  UNDO         (undo last record)
+#   Switch B  short  → CC 24              (label driven by Ultra8 assignment)
 #
 # B long and 2 long are reserved (not assigned) in this release.
 #
@@ -34,6 +34,7 @@
 from pyswitch.hardware.devices.pa_midicaptain_nano_4 import *
 from pyswitch.clients.local.actions.custom import CUSTOM_MESSAGE
 from pyswitch.clients.ultra8.actions.lane_state import ULTRA8_LANE_STATE
+from pyswitch.clients.ultra8.actions.labeled_button import ULTRA8_LABELED_BUTTON
 from pyswitch.colors import Colors
 from display import DISPLAY_HEADER_1, DISPLAY_HEADER_2, DISPLAY_FOOTER_1, DISPLAY_FOOTER_2
 from ultra8_config import DEFAULT_PAGE
@@ -53,28 +54,28 @@ def _cc(number):
 Inputs = [
 
     # ── Switch 1 (back-left) ─────────────────────────────────────────────────
-    # Short: PLY/STP (CC22)   Long: MON (CC23)
+    # Short: CC22   Long: MON (CC23)
+    # Corner label owned by the short-press action only; hold gets display=None
+    # so it never overwrites the short-press label between presses.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_1,
         "actions": [
-            CUSTOM_MESSAGE(
+            ULTRA8_LABELED_BUTTON(
+                control_id     = 4,          # UNDO — label tracks Ultra8 assignment for CC22
                 message        = _cc(22),
-                text           = "PLY/STP",
-                color          = Colors.LIGHT_GREEN,
+                color          = Colors.YELLOW,
                 led_brightness = 0.3,
                 display        = DISPLAY_HEADER_1,
             ),
         ],
         "actionsHold": [
-            CUSTOM_MESSAGE(
+            ULTRA8_LABELED_BUTTON(
+                control_id     = 3,          # MON
                 message        = _cc(23),
-                text           = "MON",
                 color          = Colors.BLUE,
                 led_brightness = 0.3,
-                display        = DISPLAY_HEADER_1,
-                use_leds       = False,   # hold action does not own LED pixels;
-                                          # all 3 NeoPixels on Switch 1 belong to
-                                          # the PLY/STP short-press action.
+                display        = None,        # hold does not own the corner label
+                use_leds       = False,       # all 3 NeoPixels belong to short action
             ),
         ],
     },
@@ -101,35 +102,34 @@ Inputs = [
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
         "actions": [
             ULTRA8_LANE_STATE(
-                lane    = DEFAULT_PAGE - 1,  # 0-indexed (device A = lane 0)
-                message = _cc(20),
-                text    = "REC/PLY",
-                display = DISPLAY_FOOTER_1,
+                lane       = DEFAULT_PAGE - 1,  # 0-indexed (device A = lane 0)
+                message    = _cc(20),
+                control_id = 0,                 # REC_PLY — drives corner label
+                text       = "REC/PLY",         # static fallback before assignment arrives
+                display    = DISPLAY_FOOTER_1,
             ),
         ],
         "actionsHold": [
-            CUSTOM_MESSAGE(
+            ULTRA8_LABELED_BUTTON(
+                control_id     = 2,          # CLR
                 message        = _cc(21),
-                text           = "CLR",
                 color          = Colors.PURPLE,
                 led_brightness = 0.3,
-                display        = DISPLAY_FOOTER_1,
-                use_leds       = False,   # CLR hold does not own any LED pixels;
-                                          # all 3 NeoPixels on Switch A belong to
-                                          # ULTRA8_LANE_STATE (feedback-driven).
+                display        = None,        # hold does not own the corner label
+                use_leds       = False,       # all 3 NeoPixels belong to ULTRA8_LANE_STATE
             ),
         ],
     },
 
     # ── Switch B (front-right) ───────────────────────────────────────────────
-    # Short: UNDO (CC24)   Long: reserved
+    # Short: CC24   Long: reserved
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_B,
         "actions": [
-            CUSTOM_MESSAGE(
+            ULTRA8_LABELED_BUTTON(
+                control_id     = 1,          # PLAY — label tracks Ultra8 assignment for CC24
                 message        = _cc(24),
-                text           = "UNDO",
-                color          = Colors.YELLOW,
+                color          = Colors.LIGHT_GREEN,
                 led_brightness = 0.3,
                 display        = DISPLAY_FOOTER_2,
             ),
