@@ -2,10 +2,11 @@
 #
 # Ultra8 NANO4 — MIDI communication configuration.
 #
-# Routing: USB MIDI (bidirectional).
-#   - Suitable for bench testing with a software MIDI monitor on a computer.
-#   - For live use through the MOTU MIDI Express XT, swap PA_MIDICAPTAIN_USB_MIDI
-#     for PA_MIDICAPTAIN_DIN_MIDI (TRS/5-pin via UART on GP16/GP17).
+# Routing: USB MIDI + DIN MIDI / TRS active simultaneously.
+#   - USB: for monitoring / development on a host computer.
+#   - DIN (GP16/GP17): for live use through the MOTU MIDI Express XT.
+#   - Both interfaces receive into the application and transmit from it.
+#     No cross-forwarding between USB and DIN — each carries its own traffic.
 #
 # in_channel = None  → accept MIDI on all inbound channels.
 #   Ultra8 will eventually broadcast SysEx snapshots; accepting all channels
@@ -18,16 +19,17 @@
 ##############################################################################
 
 from pyswitch.controller.midi import MidiRouting
-from pyswitch.hardware.devices.pa_midicaptain import PA_MIDICAPTAIN_USB_MIDI
+from pyswitch.hardware.devices.pa_midicaptain import PA_MIDICAPTAIN_USB_MIDI, PA_MIDICAPTAIN_DIN_MIDI
 from pyswitch.clients.ultra8.protocol import Ultra8Protocol
 
-# USB MIDI — connect to a computer for testing.
-# For MOTU routing, replace with:
-#   from pyswitch.hardware.devices.pa_midicaptain import PA_MIDICAPTAIN_DIN_MIDI
-#   _MIDI = PA_MIDICAPTAIN_DIN_MIDI(in_channel=None, out_channel=0)
-_MIDI = PA_MIDICAPTAIN_USB_MIDI(
+_USB_MIDI = PA_MIDICAPTAIN_USB_MIDI(
     in_channel  = None,   # Accept all channels (SysEx snapshots arrive on any channel)
-    out_channel = 0,      # 0-indexed: channel 1 (raw CC bytes in inputs.py encode the lane channel directly)
+    out_channel = 0,      # 0-indexed: channel 1
+)
+
+_DIN_MIDI = PA_MIDICAPTAIN_DIN_MIDI(
+    in_channel  = None,   # Accept all channels
+    out_channel = 0,      # 0-indexed: channel 1
 )
 
 Communication = {
@@ -36,16 +38,13 @@ Communication = {
 
     "midi": {
         "routings": [
-            # Receive MIDI from USB into the application
-            MidiRouting(
-                source = _MIDI,
-                target = MidiRouting.APPLICATION,
-            ),
-            # Send MIDI from the application out over USB
-            MidiRouting(
-                source = MidiRouting.APPLICATION,
-                target = _MIDI,
-            ),
+            # USB: receive into application, send from application
+            MidiRouting(source = _USB_MIDI,              target = MidiRouting.APPLICATION),
+            MidiRouting(source = MidiRouting.APPLICATION, target = _USB_MIDI),
+
+            # DIN: receive into application, send from application
+            MidiRouting(source = _DIN_MIDI,              target = MidiRouting.APPLICATION),
+            MidiRouting(source = MidiRouting.APPLICATION, target = _DIN_MIDI),
         ]
     },
 }

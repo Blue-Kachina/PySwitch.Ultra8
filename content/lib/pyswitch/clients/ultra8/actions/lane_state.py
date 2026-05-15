@@ -83,9 +83,10 @@ def _make_bar(loop_phase):
 # ── Public factory function ───────────────────────────────────────────────────
 
 def ULTRA8_LANE_STATE(
-    lane,                   # 0-indexed lane index (DEFAULT_PAGE - 1)
-    message,                # Raw bytes sent on short press (NANO4 → Ultra8)
-    message_release = None, # Raw bytes sent on release (optional)
+    message,                # Raw bytes (or callable → bytes) sent on short press
+    lane = 0,               # Boot-default lane index (0-indexed); overridden at
+                            # runtime by page_state.get()-1 when available.
+    message_release = None, # Raw bytes (or callable) sent on release (optional)
     control_id = 0,         # Assignment control ID for corner label (0 = REC_PLY)
     text = "",              # Fallback label text if no assignment message received
     display = None,         # DisplayLabel for screen corner label
@@ -127,8 +128,9 @@ class _LaneStateCallback(Callback):
         # No CC listener — update_displays() polls protocol.snapshot directly.
         super().__init__(mappings = [])
 
-        self.__lane            = lane
-        self.__message         = message
+        self.__lane_fallback   = lane   # used only if page_state unavailable
+        self.__page_state      = None   # set in init(); drives runtime lane
+        self.__message         = message        # may be bytes or callable → bytes
         self.__message_release = message_release
         self.__control_id      = control_id
         self.__text            = text   # fallback if assignments unavailable
@@ -141,6 +143,7 @@ class _LaneStateCallback(Callback):
         self.__current_brightness = _BRIGHTNESS_EMPTY
 
         # Display label references — set in init() via late-import
+        self.__lane_label     = None   # DISPLAY_LANE:  "Lane N" centre header
         self.__state_label    = None   # DISPLAY_STATE: big state name
         self.__progress_label = None   # DISPLAY_PROGRESS: ASCII bar
         self.__seq_label      = None   # DISPLAY_SEQ: snapshot seq counter
@@ -155,12 +158,20 @@ class _LaneStateCallback(Callback):
 
         # Late-import display labels (display.py loads after communication.py).
         try:
-            from display import DISPLAY_STATE, DISPLAY_PROGRESS, DISPLAY_SEQ
+            from display import DISPLAY_LANE, DISPLAY_STATE, DISPLAY_PROGRESS, DISPLAY_SEQ
+            self.__lane_label     = DISPLAY_LANE
             self.__state_label    = DISPLAY_STATE
             self.__progress_label = DISPLAY_PROGRESS
             self.__seq_label      = DISPLAY_SEQ
         except (ImportError, AttributeError):
             pass   # running without display (tests, emulator, etc.)
+
+        # Late-import page_state for runtime lane selection.
+        try:
+            from pyswitch.clients.ultra8 import page_state
+            self.__page_state = page_state
+        except ImportError:
+            pass   # running without the Ultra8 client
 
         # Late-import shared assignment store (Unit 6.5).
         try:
@@ -179,11 +190,13 @@ class _LaneStateCallback(Callback):
     # ── Button press / release ────────────────────────────────────────────────
 
     def push(self):
-        self.__appl.client.midi.send(self._RawMessage(self.__message))
+        msg = self.__message() if callable(self.__message) else self.__message
+        self.__appl.client.midi.send(self._RawMessage(msg))
 
     def release(self):
         if self.__message_release:
-            self.__appl.client.midi.send(self._RawMessage(self.__message_release))
+            msg = self.__message_release() if callable(self.__message_release) else self.__message_release
+            self.__appl.client.midi.send(self._RawMessage(msg))
 
     # ── Periodic update (called every loop cycle by the framework) ───────────
 
@@ -195,6 +208,13 @@ class _LaneStateCallback(Callback):
 
     def update_displays(self):
         protocol = self.__appl.client.protocol
+
+        # ── Current lane (dynamic: driven by page_state at runtime) ───────────
+        lane = (self.__page_state.get() - 1) if self.__page_state else self.__lane_fallback
+
+        # ── Lane label — keep in sync with current page ───────────────────────
+        if self.__lane_label:
+            self.__lane_label.text = "Lane " + str(lane + 1)
 
         # ── Stale check ───────────────────────────────────────────────────────
         last_ms = protocol.last_feedback_ms
@@ -220,7 +240,7 @@ class _LaneStateCallback(Callback):
 
         else:
             # ── Decode current lane state from snapshot ───────────────────────
-            lane_block = protocol.snapshot.lanes[self.__lane]
+            lane_block = protocol.snapshot.lanes[lane]
             state      = lane_block.state
             dirty      = lane_block.dirty
             loop_phase = lane_block.loop_phase

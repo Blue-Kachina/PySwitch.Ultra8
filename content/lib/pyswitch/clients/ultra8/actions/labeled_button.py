@@ -94,11 +94,13 @@ class _LabeledButtonCallback(Callback):
             pass   # running without the Ultra8 client (tests, emulator)
 
     def push(self):
-        self.__appl.client.midi.send(self._RawMessage(self.__message))
+        msg = self.__message() if callable(self.__message) else self.__message
+        self.__appl.client.midi.send(self._RawMessage(msg))
 
     def release(self):
         if self.__message_release:
-            self.__appl.client.midi.send(self._RawMessage(self.__message_release))
+            msg = self.__message_release() if callable(self.__message_release) else self.__message_release
+            self.__appl.client.midi.send(self._RawMessage(msg))
 
     def update_displays(self):
         self.action.switch_color      = self.__color

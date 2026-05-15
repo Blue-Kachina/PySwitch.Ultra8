@@ -117,6 +117,19 @@ DISPLAY_SEQ = DisplayLabel(
     },
 )
 
+# ── Lane label (exported so lane_state.py can update it on page change) ──────
+
+# Text is initialised from DEFAULT_PAGE; lane_state.py overwrites it every
+# update_displays() cycle with the current page_state value.
+DISPLAY_LANE = DisplayLabel(
+    bounds = DisplayBounds(0, 50, _W, 28),
+    layout = {
+        "font":      "/fonts/H20.pcf",
+        "text":      "Lane " + str(DEFAULT_PAGE),
+        "textColor": Colors.GRAY,
+    },
+)
+
 # ── Splash screen ─────────────────────────────────────────────────────────────
 
 Splashes = SplashesCallback(
@@ -129,16 +142,8 @@ Splashes = SplashesCallback(
             DISPLAY_FOOTER_1,
             DISPLAY_FOOTER_2,
 
-            # Lane number — static, derived from per-device config.
-            # Identifies which Ultra8 lane this unit controls.
-            DisplayLabel(
-                bounds = DisplayBounds(0, 50, _W, 28),
-                layout = {
-                    "font":      "/fonts/H20.pcf",
-                    "text":      "Lane " + str(DEFAULT_PAGE),
-                    "textColor": Colors.GRAY,
-                },
-            ),
+            # Lane number — updated at runtime by lane_state.py when page changes.
+            DISPLAY_LANE,
 
             # Primary state — updated live by lane_state.py
             DISPLAY_STATE,
