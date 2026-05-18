@@ -102,13 +102,14 @@ def _make_bar(loop_phase):
     return "█" * filled + "░" * (_BAR_WIDTH - filled)
 
 
-def _state_to_name(function_name, state, dirty, monmode):
+def _state_to_name(function_name, state, dirty, monmode, undo_redo_state=0):
     """Map a snapshot lane block to a dynamic_leds state name.
 
     Different function types use different dimensions of the lane block:
       REC_PLY / PLY_STP  — lane recording state enum
       CLR                — dirty flag (has audio content)
       MON                — monmode flag
+      UNDO               — undo_redo_state (0=none, 1=undo available, 2=redo available)
       others             — "waiting" (safe unknown fallback)
     """
     if function_name in ("REC_PLY", "PLY_STP"):
@@ -126,6 +127,13 @@ def _state_to_name(function_name, state, dirty, monmode):
         return "has_audio" if dirty else "empty"
     elif function_name == "MON":
         return "active" if monmode else "inactive"
+    elif function_name == "UNDO":
+        if undo_redo_state == 1:
+            return "available"
+        elif undo_redo_state == 2:
+            return "redo_available"
+        else:
+            return "unavailable"
     else:
         return "waiting"
 
@@ -200,6 +208,9 @@ class _LaneActionCallback(Callback):
 
         # Function name discovered via assignment reverse-lookup (tier-3)
         self._dynamic_function = None   # e.g. "REC_PLY"
+
+        # Last resolved dynamic_leds state entry — shared between LED and label
+        self._current_led_entry = None  # dict with "color", "brightness", "label"
 
         # Modules and data loaded in init()
         self._page_state   = None
@@ -350,7 +361,11 @@ class _LaneActionCallback(Callback):
     # ── Private: dynamic LED resolution ──────────────────────────────────────
 
     def _update_dynamic_led(self, protocol, lane):
-        """Resolve LED color from dynamic_leds.json × (function × state)."""
+        """Resolve LED color from dynamic_leds.json × (function × state).
+
+        Also caches the full state entry in self._current_led_entry so that
+        _resolve_corner_label() can read the "label" key without a second lookup.
+        """
 
         # Step 1: discover which function is bound to this button's CC
         if self._assignments is not None:
@@ -361,7 +376,6 @@ class _LaneActionCallback(Callback):
         # Step 2: map lane block to a state name
         if protocol.snapshot is None:
             state_name = "waiting"
-            lb = None
         else:
             lb = protocol.snapshot.lanes[lane]
             if self._dynamic_function:
@@ -370,6 +384,7 @@ class _LaneActionCallback(Callback):
                     lb.state,
                     lb.dirty,
                     lb.monmode,
+                    lb.undo_redo_state,
                 )
             else:
                 # Function not yet known — use generic waiting state
@@ -383,6 +398,9 @@ class _LaneActionCallback(Callback):
             # If the exact state is absent, fall through to fallback
             if led_entry is None and state_name not in ("waiting", "error"):
                 led_entry = fn_map.get("waiting")
+
+        # Cache entry for label resolution (shared with _resolve_corner_label)
+        self._current_led_entry = led_entry
 
         if led_entry is not None:
             color_name = led_entry.get("color", "DARK_GRAY")
@@ -400,14 +418,23 @@ class _LaneActionCallback(Callback):
     # ── Private: corner label ─────────────────────────────────────────────────
 
     def _resolve_corner_label(self):
-        """Three-tier label resolution.
+        """Four-tier label resolution.
 
-        Tier 3: live function display name from assignment match
-                (e.g. CC20 matches REC_PLY → "REC/PLY")
-        Tier 2: static label from JSON button.label field
-        Tier 1: auto-fallback "CC{N}"
+        Tier 3a: state-driven label from dynamic_leds.json state entry "label" key
+                 (e.g. REC_PLY in "empty" state → "REC"; in "playing" → "OVDB").
+                 null in the JSON means "no override — fall through to tier 3".
+        Tier 3:  static function display name from assignment store
+                 (e.g. CC20 matches REC_PLY → "REC/PLY")
+        Tier 2:  static label from JSON button.label field
+        Tier 1:  auto-fallback "CC{N}"
         """
-        # Tier 3 (dynamic only): live label from assignment store
+        # Tier 3a (dynamic only): state-driven label from cached dynamic_leds entry
+        if self._dynamic and self._current_led_entry is not None:
+            state_label = self._current_led_entry.get("label")
+            if state_label is not None:
+                return state_label
+
+        # Tier 3 (dynamic only): live static function name from assignment store
         if self._dynamic and self._dynamic_function is not None:
             if self._assignments is not None:
                 return self._assignments.get_display_label(self._dynamic_function)

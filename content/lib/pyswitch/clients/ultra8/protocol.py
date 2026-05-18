@@ -18,7 +18,7 @@
 #   2. data[0]          == 0x55            (protocol ID)
 #   3. data[1]          == 0x01            (msg_type: state snapshot)
 #   4. len(data)        == 30              (total packet 33 bytes)
-#   5. data[6 + N*3]    == N  for N in 0–7 (lane_index sanity)
+#   5. (data[6 + N*3] & 0x07) == N  for N in 0–7 (lane_info bits 2:0 sanity)
 #   6. seq != last accepted snapshot seq   (duplicate suppression)
 #
 # Assignment message validation rules (docs/protocol_assignment_metadata_v0_1.md):
@@ -58,25 +58,31 @@ STATE_OVERDUBBING = 3    # overdub on existing loop
 # ── Data classes ───────────────────────────────────────────────────────────
 
 class _LaneBlock:
-    """Parsed lane data from one 3-byte lane block."""
+    """Parsed lane data from one 3-byte lane block.
+
+    lane_info byte layout (byte +0 of each block):
+      bits 2:0  lane_index      — sanity check, must equal block position N
+      bits 4:3  undo_redo_state — 0=none, 1=undo available, 2=redo available
+      bits 6:5  reserved
+    """
 
     __slots__ = ("lane_index", "state", "dirty", "selected",
-                 "monmode", "reverse", "loop_phase")
+                 "monmode", "undo_redo_state", "loop_phase")
 
-    def __init__(self, lane_index, flags, loop_phase):
-        self.lane_index = lane_index
-        self.state      =  flags        & 0x03
-        self.dirty      = (flags >> 2)  & 0x01
-        self.selected   = (flags >> 3)  & 0x01
-        self.monmode    = (flags >> 4)  & 0x03
-        self.reverse    = (flags >> 6)  & 0x01
-        self.loop_phase = loop_phase
+    def __init__(self, lane_info, flags, loop_phase):
+        self.lane_index      = lane_info & 0x07
+        self.undo_redo_state = (lane_info >> 3) & 0x03   # 0=none 1=undo 2=redo
+        self.state           =  flags           & 0x03
+        self.dirty           = (flags >> 2)     & 0x01
+        self.selected        = (flags >> 3)     & 0x01
+        self.monmode         = (flags >> 4)     & 0x03
+        self.loop_phase      = loop_phase
 
     def __repr__(self):
         return (
-            "_LaneBlock(lane={} state={} dirty={} sel={} mon={} rev={} phase={})".format(
+            "_LaneBlock(lane={} state={} dirty={} sel={} mon={} undo_redo={} phase={})".format(
                 self.lane_index, self.state, self.dirty,
-                self.selected, self.monmode, self.reverse, self.loop_phase
+                self.selected, self.monmode, self.undo_redo_state, self.loop_phase
             )
         )
 
@@ -196,11 +202,12 @@ class Ultra8Protocol:
             return True
 
         # ── Lane-index sanity for all 8 blocks ────────────────────────────
+        # bits 4:3 of each lane_info byte carry undo_redo_state — mask to low 3 bits
         for n in range(_NUM_LANES):
-            if data[6 + n * 3] != n:
+            if (data[6 + n * 3] & 0x07) != n:
                 if self.debug:
                     print("U8 proto [snap]: lane_index mismatch at block", n,
-                          "got", data[6 + n * 3])
+                          "got", data[6 + n * 3] & 0x07)
                 return False
 
         # ── Extract global fields ─────────────────────────────────────────
@@ -212,7 +219,7 @@ class Ultra8Protocol:
         for n in range(_NUM_LANES):
             base = 6 + n * 3
             lanes.append(_LaneBlock(
-                lane_index = data[base],
+                lane_info  = data[base],       # bits 2:0 = index, bits 4:3 = undo_redo_state
                 flags      = data[base + 1],
                 loop_phase = data[base + 2],
             ))

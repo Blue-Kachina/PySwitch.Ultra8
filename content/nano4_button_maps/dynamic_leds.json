@@ -4,62 +4,63 @@
     "REC_PLY": {
       "description": "Record / Play / Overdub toggle — the primary lane control button.",
       "states": {
-        "recording":   { "color": "RED",          "brightness": 0.3  },
-        "overdubbing": { "color": "RED",          "brightness": 0.3  },
-        "playing":     { "color": "BLUE",         "brightness": 0.3  },
-        "stopped":     { "color": "DARK_GRAY",    "brightness": 0.15 },
-        "empty":       { "color": "BLACK",        "brightness": 0.02 },
-        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 },
-        "error":       { "color": "PURPLE",       "brightness": 0.3  }
+        "recording":   { "color": "RED",           "brightness": 0.3,  "label": "PLY"  },
+        "overdubbing": { "color": "RED",           "brightness": 0.3,  "label": "PLY"  },
+        "playing":     { "color": "TURQUOISE",     "brightness": 0.3,  "label": "REC" },
+        "stopped":     { "color": "DARK_GRAY",     "brightness": 0.15, "label": "REC"  },
+        "empty":       { "color": "BLACK",         "brightness": 0.02, "label": "REC"  },
+        "waiting":     { "color": "DARK_GRAY",     "brightness": 0.02, "label": null   },
+        "error":       { "color": "PURPLE",        "brightness": 0.3,  "label": null   }
       }
     },
 
     "PLY_STP": {
       "description": "Play / Stop toggle.",
       "states": {
-        "recording":   { "color": "RED",          "brightness": 0.3  },
-        "overdubbing": { "color": "RED",          "brightness": 0.3  },
-        "playing":     { "color": "BLUE",         "brightness": 0.3  },
-        "stopped":     { "color": "DARK_GRAY",    "brightness": 0.15 },
-        "empty":       { "color": "BLACK",        "brightness": 0.02 },
-        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 },
-        "error":       { "color": "PURPLE",       "brightness": 0.3  }
+        "recording":   { "color": "RED",           "brightness": 0.3,  "label": "STP"  },
+        "overdubbing": { "color": "RED",           "brightness": 0.3,  "label": "STP"  },
+        "playing":     { "color": "TURQUOISE",     "brightness": 0.3,  "label": "STP"  },
+        "stopped":     { "color": "DARK_GRAY",     "brightness": 0.15, "label": "PLY"  },
+        "empty":       { "color": "BLACK",         "brightness": 0.02, "label": null  },
+        "waiting":     { "color": "DARK_GRAY",     "brightness": 0.02, "label": null   },
+        "error":       { "color": "PURPLE",        "brightness": 0.3,  "label": null   }
       }
     },
 
     "CLR": {
       "description": "Clear lane. Lit when there is audio content to clear.",
       "states": {
-        "has_audio":   { "color": "PURPLE",       "brightness": 0.3  },
-        "empty":       { "color": "DARK_PURPLE",  "brightness": 0.1  },
-        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+        "has_audio":   { "color": "PURPLE",        "brightness": 0.3,  "label": "CLR"  },
+        "empty":       { "color": "DARK_PURPLE",   "brightness": 0.1,  "label": null  },
+        "waiting":     { "color": "DARK_GRAY",     "brightness": 0.02, "label": null   }
       }
     },
 
     "MON": {
       "description": "Monitor / speaker toggle.",
       "states": {
-        "active":      { "color": "BLUE",         "brightness": 0.3  },
-        "inactive":    { "color": "DARK_BLUE",    "brightness": 0.1  },
-        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+        "active":      { "color": "BLUE",          "brightness": 0.3,  "label": "MON"  },
+        "inactive":    { "color": "DARK_BLUE",     "brightness": 0.1,  "label": "MON"  },
+        "waiting":     { "color": "DARK_GRAY",     "brightness": 0.02, "label": null   }
       }
     },
 
     "UNDO": {
-      "description": "Undo last destructive action. Lit when undo stack is non-empty.",
+      "description": "Undo / Redo toggle. State reflects what the next press will do.",
       "states": {
-        "available":   { "color": "YELLOW",       "brightness": 0.3  },
-        "unavailable": { "color": "DARK_YELLOW",  "brightness": 0.1  },
-        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+        "available":       { "color": "DARK_YELLOW",      "brightness": 0.3,  "label": "UNDO" },
+        "redo_available":  { "color": "DARK_ORANGE",      "brightness": 0.3,  "label": "REDO" },
+        "unavailable":     { "color": "DARK_GRAY",        "brightness": 0.02,  "label": null },
+        "waiting":         { "color": "DARK_GRAY",        "brightness": 0.02, "label": null   }
       }
     },
 
     "REDO": {
       "description": "Redo (future — not yet in Ultra8 protocol). Lit when redo stack is non-empty.",
       "states": {
-        "available":   { "color": "YELLOW",       "brightness": 0.3  },
-        "unavailable": { "color": "DARK_YELLOW",  "brightness": 0.1  },
-        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+        "available":   { "color": "YELLOW",        "brightness": 0.3,  "label": "REDO" },
+        "unavailable": { "color": "DARK_YELLOW",   "brightness": 0.1,  "label": "REDO" },
+        "waiting":     { "color": "DARK_GRAY",     "brightness": 0.02, "label": null   }
       }
     }
 

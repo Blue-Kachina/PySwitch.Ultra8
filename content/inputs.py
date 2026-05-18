@@ -29,10 +29,10 @@
 #   Switch B  long   →        PAGE DOWN    (prev_lane)
 #
 # LED behavior:
-#   Buttons A and B are "dynamic: true" — their LED color and corner label
+#   Buttons A, B, and 1 are "dynamic: true" — their LED color and corner label
 #   are driven by dynamic_leds.json based on the Ultra8 function currently
 #   assigned to each button and the live lane state from SysEx snapshots.
-#   Buttons 1 and 2 use a fixed color defined in the JSON config.
+#   Button 2 uses a fixed color defined in the JSON config.
 #
 # Press behaviour: messages fire on SHORT RELEASE.  When a button has both
 # `actions` and `actionsHold`, PySwitch delays firing `actions` until the
@@ -148,28 +148,36 @@ def _short_label(button, cc_number):
 Inputs = [
 
     # ── Switch 1 (back-left) ─────────────────────────────────────────────────
-    # Short: CC22   Long: MON (CC23)
-    # Not dynamic — fixed color LED, tier-1/2 label only.
-    # Hold does not own LEDs or corner label (short-press action owns them).
+    # Short: UNDO (CC22) — dynamic LED + tier-3 label from dynamic_leds.json.
+    # Long:  REDO (CC23) — fixed CUSTOM_MESSAGE; hold does not own LEDs.
+    # LED reflects undo_available from SysEx snapshot (bright vs dim yellow).
+    # Corner label resolves to "UNDO" once assignment message arrives; falls
+    # back to "UN/REDO" (tier-2 JSON label) until then.
+    # Note: REDO display (long-press state feedback) requires redo_available in
+    # the SysEx snapshot — deferred to protocol v0.2 / QoL Phase 2.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_1,
         "actions": [
-            CUSTOM_MESSAGE(
+            ULTRA8_LANE_ACTION(
                 message        = _cc(_CC_1_SHORT),
-                text           = _short_label("1", _CC_1_SHORT),
+                cc_number      = _CC_1_SHORT,
+                label          = _btn_label("1"),       # tier-2: "UN/REDO" from JSON
                 color          = _btn_color("1", "YELLOW"),
                 led_brightness = _btn_brightness("1", 0.3),
+                dynamic        = True,
+                drives_display = False,                 # center display owned by Switch A
+                lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_HEADER_1,
             ),
         ],
         "actionsHold": [
             CUSTOM_MESSAGE(
                 message        = _cc(_CC_1_LONG),
-                text           = "CC{}".format(_CC_1_LONG),   # hold: always tier-1
-                color          = Colors.BLUE,
+                text           = "CC{}".format(_CC_1_LONG),   # hold: tier-1 until REDO in protocol
+                color          = Colors.YELLOW,
                 led_brightness = 0.3,
                 display        = None,    # hold does not own the corner label
-                use_leds       = False,   # LEDs belong to short action
+                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION
             ),
         ],
     },
