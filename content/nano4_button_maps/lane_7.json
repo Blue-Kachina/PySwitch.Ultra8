@@ -35,6 +35,7 @@
     "1": {
       "color": "YELLOW",
       "led_brightness": 0.3,
+      "dynamic": true,
       "label": "UN/REDO",
       "short": {
         "type": "cc",
@@ -48,6 +49,7 @@
     "2": {
       "color": "ORANGE",
       "led_brightness": 0.3,
+      "dynamic": true,
       "label": "REV",
       "short": {
         "type": "cc",

@@ -139,6 +139,8 @@ def load_lane_config(lane_number):
         return None
 
 
+# ── Dynamic LED loader ─────────────────────────────────────────────────────────
+
 def load_dynamic_leds():
     """Load and parse dynamic_leds.json.
 
@@ -180,7 +182,7 @@ def load_dynamic_leds():
         print("lane_config: JSON parse error in", path, ":", exc)
         _dynamic_leds_cache = {}
 
-    return _dynamic_leds_cache
+    return _dynamic_leds_cache if _dynamic_leds_cache is not None else {}
 
 
 # ── Gesture resolver ───────────────────────────────────────────────────────────
