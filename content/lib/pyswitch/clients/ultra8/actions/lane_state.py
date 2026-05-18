@@ -34,17 +34,17 @@
 #   RECORDING             → empty (no loop exists yet)
 #   All other states      → empty
 #
-# Stale detection:
-#   Reads protocol.last_feedback_ms each cycle. Reverts to "wait" state if
-#   None (no snapshot ever received) or older than FEEDBACK_TIMEOUT_MS ms.
-#   Recovers automatically on the next valid snapshot.
+# Boot guard:
+#   Shows "wait" state only while protocol.snapshot is None — i.e., before
+#   the very first valid SysEx snapshot is received after power-on.  Once
+#   any snapshot arrives the display latches to real state and never reverts
+#   to wait, regardless of how long the MIDI connection is silent.
 #
 ##############################################################################
 
 from ....controller.callbacks import Callback
 from ....controller.actions import Action
 from ....colors import Colors
-from ....misc import get_current_millis
 from adafruit_midi.midi_message import MIDIMessage
 
 # ── LED colours per state ─────────────────────────────────────────────────────
@@ -148,8 +148,6 @@ class _LaneStateCallback(Callback):
         self.__progress_label = None   # DISPLAY_PROGRESS: ASCII bar
         self.__seq_label      = None   # DISPLAY_SEQ: snapshot seq counter
 
-        self.__feedback_timeout_ms = None  # loaded from ultra8_config in init()
-
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def init(self, appl, listener = None):
@@ -180,13 +178,6 @@ class _LaneStateCallback(Callback):
         except ImportError:
             pass   # running without the Ultra8 client
 
-        # Late-import timeout from per-device config. Fallback: 5000 ms.
-        try:
-            from ultra8_config import FEEDBACK_TIMEOUT_MS
-            self.__feedback_timeout_ms = FEEDBACK_TIMEOUT_MS
-        except (ImportError, AttributeError):
-            self.__feedback_timeout_ms = 5000
-
     # ── Button press / release ────────────────────────────────────────────────
 
     def push(self):
@@ -216,14 +207,8 @@ class _LaneStateCallback(Callback):
         if self.__lane_label:
             self.__lane_label.text = "Lane " + str(lane + 1)
 
-        # ── Stale check ───────────────────────────────────────────────────────
-        last_ms = protocol.last_feedback_ms
-        stale = (
-            last_ms is None or
-            (get_current_millis() - last_ms) > self.__feedback_timeout_ms
-        )
-
-        if stale:
+        # ── Boot guard — show "wait" only until the first snapshot arrives ───────
+        if protocol.snapshot is None:
             # ── Waiting / no signal ───────────────────────────────────────────
             self.__current_color      = _COLOR_WAITING
             self.__current_brightness = _BRIGHTNESS_EMPTY
@@ -239,7 +224,7 @@ class _LaneStateCallback(Callback):
                 self.__seq_label.text = ""
 
         else:
-            # ── Decode current lane state from snapshot ───────────────────────
+            # ── Snapshot available — decode current lane state ────────────────
             lane_block = protocol.snapshot.lanes[lane]
             state      = lane_block.state
             dirty      = lane_block.dirty

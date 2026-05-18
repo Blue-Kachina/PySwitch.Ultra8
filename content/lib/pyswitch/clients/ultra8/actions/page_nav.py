@@ -74,5 +74,8 @@ class _PageNavCallback(Callback):
             self.__page_state.decrement()
         self.__appl.reset_actions()
 
+    def release(self):
+        pass   # Hold actions fire once on push; nothing to do on release.
+
     def update_displays(self):
         pass   # LEDs and label are owned by the co-assigned short-press action

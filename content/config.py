@@ -31,7 +31,7 @@ Config = {
 
     # Enables file transfer via MIDI from and to the device using PyMidiBridge (https://github.com/Tunetown/PyMidiBridge).
     # This costs about 11kB of RAM, so if you run into memory issues, disable this.
-    "enableMidiBridge": True,
+    "enableMidiBridge": False,   # Disabled: not needed; USB drive deployment is used instead. MidiBridgeWrapper was intercepting Ultra8 SysEx.
 
     # Globally used dim factors for the DisplayLabels. 
     #"displayDimFactorOn": 1,
@@ -48,11 +48,10 @@ Config = {
     # Debug output is printed to serial console via USB. 
     # See https://learn.adafruit.com/welcome-to-circuitpython/advanced-serial-console-on-mac-and-linux 
 
-    #"debugStats": True,                              # Show info about runtime and memory usage periodically every update interval
-    #"debugStatsInterval": 2000,                      # Update interval for runtime statistics (also affects the performance dot, default is 
-                                                      # the "updateInterval" option)
+    "debugStats": True,                               # Show info about runtime and memory usage periodically every update interval
+    "debugStatsInterval": 3000,                       # Print stats every 3 seconds — confirms serial is alive
     #"debugBidirectionalProtocol": True,              # Debug the bidirectional protocol, if any
-    #"debugUnparsedMessages": True,                   # Shows all incoming MIDI messages which have not been parsed by the application.
+    "debugUnparsedMessages": True,                    # Shows all incoming MIDI messages which have not been parsed by the application.
     #"debugSentMessages": True,                       # Shows all sent messages
     #"excludeMessageTypes": [ "SystemExclusive" ],    # Types to excude from "debugUnparsedMessage"
     #"debugClientStats": True,                        # Periodically shows client information (pending requests etc.). "debugStatsInterval" is used as period.
