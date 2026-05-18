@@ -22,9 +22,9 @@
 #
 # Center area breakdown (y=40..200, 160px):
 #   y= 50  h=28  Lane label (static)
-#   y= 78  h=65  DISPLAY_STATE   — updated by lane_state.py (state name, big)
-#   y=143  h=30  DISPLAY_PROGRESS — updated by lane_state.py (ASCII bar)
-#   y=173  h=22  DISPLAY_SEQ     — updated by lane_state.py (seq counter)
+#   y= 78  h=65  DISPLAY_STATE   — updated by lane_action.py (state name, big)
+#   y=143  h=30  DISPLAY_PROGRESS — updated by lane_action.py (ASCII bar)
+#   y=173  h=22  DISPLAY_SEQ     — updated by lane_action.py (seq counter)
 #   Total used: 145px; 15px breathing room before footer.
 #
 # DISPLAY_HEADER_* and DISPLAY_FOOTER_* are exported so inputs.py can
@@ -43,7 +43,8 @@ from pyswitch.colors import Colors, DEFAULT_LABEL_COLOR
 from pyswitch.ui.ui import DisplayElement, DisplayBounds
 from pyswitch.ui.elements import DisplayLabel
 from pyswitch.clients.local.callbacks.splashes import SplashesCallback
-from ultra8_config import DEFAULT_PAGE
+from pyswitch.clients.ultra8.lane_config import load_default_lane as _load_default_lane
+DEFAULT_PAGE = _load_default_lane()   # initial lane for DISPLAY_LANE text
 
 # ── Dimensions ───────────────────────────────────────────────────────────────
 
@@ -82,10 +83,10 @@ DISPLAY_FOOTER_2 = DisplayLabel(           # Switch B, front-right
     bounds = DisplayBounds(_SW,  _FY, _SW, _SH),
 )
 
-# ── Center dynamic labels (exported for lane_state.py to update) ──────────────
+# ── Center dynamic labels (exported for lane_action.py to update) ──────────────
 
 # Primary state name — large, coloured text.
-# Updated by lane_state.py to: "REC", "PLY", "OVDB", "STP", "---", "wait", "ERR"
+# Updated by lane_action.py to: "REC", "PLY", "OVDB", "STP", "---", "wait", "ERR"
 DISPLAY_STATE = DisplayLabel(
     bounds = DisplayBounds(0, 78, _W, 65),
     layout = {
@@ -96,7 +97,7 @@ DISPLAY_STATE = DisplayLabel(
 )
 
 # Loop progress bar — ASCII block characters.
-# Updated by lane_state.py when PLAYING or OVERDUBBING; empty otherwise.
+# Updated by lane_action.py when PLAYING or OVERDUBBING; empty otherwise.
 DISPLAY_PROGRESS = DisplayLabel(
     bounds = DisplayBounds(0, 143, _W, 30),
     layout = {
@@ -107,7 +108,7 @@ DISPLAY_PROGRESS = DisplayLabel(
 )
 
 # Snapshot sequence counter — tiny, dark gray.
-# Updated by lane_state.py to "#N" on each accepted snapshot; empty when stale.
+# Updated by lane_action.py to "#N" on each accepted snapshot; empty when stale.
 DISPLAY_SEQ = DisplayLabel(
     bounds = DisplayBounds(0, 173, _W, 22),
     layout = {
@@ -117,9 +118,9 @@ DISPLAY_SEQ = DisplayLabel(
     },
 )
 
-# ── Lane label (exported so lane_state.py can update it on page change) ──────
+# ── Lane label (exported so lane_action.py can update it on page change) ──────
 
-# Text is initialised from DEFAULT_PAGE; lane_state.py overwrites it every
+# Text is initialised from DEFAULT_PAGE; lane_action.py overwrites it every
 # update_displays() cycle with the current page_state value.
 DISPLAY_LANE = DisplayLabel(
     bounds = DisplayBounds(0, 50, _W, 28),
@@ -142,16 +143,16 @@ Splashes = SplashesCallback(
             DISPLAY_FOOTER_1,
             DISPLAY_FOOTER_2,
 
-            # Lane number — updated at runtime by lane_state.py when page changes.
+            # Lane number — updated at runtime by lane_action.py when page changes.
             DISPLAY_LANE,
 
-            # Primary state — updated live by lane_state.py
+            # Primary state — updated live by lane_action.py
             DISPLAY_STATE,
 
-            # Loop progress bar — updated live by lane_state.py
+            # Loop progress bar — updated live by lane_action.py
             DISPLAY_PROGRESS,
 
-            # Snapshot sequence counter — updated live by lane_state.py
+            # Snapshot sequence counter — updated live by lane_action.py
             DISPLAY_SEQ,
         ],
     )

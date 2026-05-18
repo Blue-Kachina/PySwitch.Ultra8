@@ -1,0 +1,62 @@
+{
+  "global": {
+    "channel": null,
+    "value": 127
+  },
+  "buttons": {
+    "A": {
+      "color": "DARK_GRAY",
+      "led_brightness": 0.3,
+      "dynamic": true,
+      "label": "REC/PLY",
+      "short": {
+        "type": "cc",
+        "index": 20
+      },
+      "long": {
+        "type": "cc",
+        "index": 21
+      }
+    },
+    "B": {
+      "color": "DARK_GRAY",
+      "led_brightness": 0.3,
+      "dynamic": true,
+      "label": "PLY/STP",
+      "short": {
+        "type": "cc",
+        "index": 24
+      },
+      "long": {
+        "type": "internal",
+        "index": "prev_lane"
+      }
+    },
+    "1": {
+      "color": "YELLOW",
+      "led_brightness": 0.3,
+      "label": "UN/REDO",
+      "short": {
+        "type": "cc",
+        "index": 22
+      },
+      "long": {
+        "type": "cc",
+        "index": 23
+      }
+    },
+    "2": {
+      "color": "ORANGE",
+      "led_brightness": 0.3,
+      "label": "REV",
+      "short": {
+        "type": "cc",
+        "index": 25
+      },
+      "long": {
+        "type": "internal",
+        "index": "next_lane"
+      }
+    }
+  }
+}

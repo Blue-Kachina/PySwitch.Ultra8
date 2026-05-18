@@ -20,12 +20,35 @@
 
 # ── Control ID → human-readable function name ─────────────────────────────
 # Names match the control-ID enum in docs/protocol_assignment_metadata_v0_1.md
+# Used by get_label() for corner display text (legacy / ULTRA8_LABELED_BUTTON).
 _NAMES = {
     0: "REC",
     1: "PLAY",
     2: "CLR",
     3: "MON",
     4: "UNDO",
+}
+
+# ── Control ID → internal function name ────────────────────────────────────
+# Keys match function names in dynamic_leds.json.
+# Used by ULTRA8_LANE_ACTION for LED lookup.
+_FUNCTION_NAMES = {
+    0: "REC_PLY",
+    1: "PLY_STP",
+    2: "CLR",
+    3: "MON",
+    4: "UNDO",
+}
+
+# ── Internal function name → display label ─────────────────────────────────
+# Human-readable text shown in button corner labels (tier-3 resolution).
+_DISPLAY_LABELS = {
+    "REC_PLY": "REC/PLY",
+    "PLY_STP": "PLY/STP",
+    "CLR":     "CLR",
+    "MON":     "MON",
+    "UNDO":    "UNDO",
+    "REDO":    "REDO",
 }
 
 # Fallback shown before the first assignment message is received.
@@ -56,6 +79,43 @@ def update(control_id, msg_type, msg_number):
     msg_number  — int, 0–127.
     """
     _store[control_id] = (msg_type & 0x7F, msg_number & 0x7F)
+
+
+def get_function_name(control_id):
+    """Return the internal function name (e.g. "REC_PLY") for the given
+    control ID.  Used for dynamic_leds.json key lookup.
+
+    Returns None for unknown control IDs.
+    """
+    return _FUNCTION_NAMES.get(control_id)
+
+
+def get_function_by_cc(msg_number):
+    """Reverse-lookup: find the function name assigned to a given CC number.
+
+    Searches the assignment store for a control with msg_type=CC and the
+    given msg_number.  Returns the internal function name (e.g. "REC_PLY")
+    if found, or None if the store is empty or no control is mapped to
+    that CC number.
+
+    Used by ULTRA8_LANE_ACTION to discover which Ultra8 function is
+    currently bound to a button's CC, enabling dynamic LED resolution
+    without a pre-declared control_id.
+    """
+    for control_id, (stored_type, number) in _store.items():
+        if stored_type == MSG_TYPE_CC and number == msg_number:
+            return _FUNCTION_NAMES.get(control_id)
+    return None
+
+
+def get_display_label(function_name):
+    """Return the human-readable corner-label string for an internal
+    function name (e.g. "REC_PLY" → "REC/PLY").
+
+    Returns the function_name unchanged if it is not in the table
+    (forward-compatibility with future function names).
+    """
+    return _DISPLAY_LABELS.get(function_name, function_name)
 
 
 def get_label(control_id):

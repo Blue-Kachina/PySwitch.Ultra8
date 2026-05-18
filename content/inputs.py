@@ -3,6 +3,7 @@
 # Ultra8 NANO4 — Button input definitions.
 #
 # Maps the four NANO4 footswitches to Ultra8 CC commands.
+#
 # MIDI channel is derived at press time from page_state.get(), so changing
 # the page with a long-press immediately affects the next button action.
 # This file is identical across all physical devices.
@@ -12,37 +13,48 @@
 #   [ 1 - back-left  ]  [ 2 - back-right ]
 #   [ A - front-left ]  [ B - front-right]
 #
-# CC assignments:
+# The active lane is read at boot from:
+#   nano4_button_maps/default_lane.txt  (single integer, 1–8)
+# CC assignments are loaded at startup from:
+#   nano4_button_maps/lane_<DEFAULT_PAGE>.json
 #
-#   Switch A  short  → CC 20  REC          (record/play/overdub)
-#   Switch A  long   → CC 21  CLR          (clear lane)
-#   Switch 1  short  → CC 22              (label driven by Ultra8 assignment)
-#   Switch 1  long   → CC 23  MON          (toggle monitor/speaker)
-#   Switch 2  short  → CC 25  STOP-LANE    (stop this lane)
-#   Switch 2  long   →        PAGE UP      (increment lane, clamped at 8)
-#   Switch B  short  → CC 24              (label driven by Ultra8 assignment)
-#   Switch B  long   →        PAGE DOWN    (decrement lane, clamped at 1)
+# If the JSON file is unavailable, the fallback CC numbers below apply:
+#   Switch A  short  → CC 20  (REC/PLY)
+#   Switch A  long   → CC 21  (CLR)
+#   Switch 1  short  → CC 22
+#   Switch 1  long   → CC 23  (MON)
+#   Switch 2  short  → CC 25  (STOP-LANE)
+#   Switch 2  long   →        PAGE UP      (next_lane)
+#   Switch B  short  → CC 24
+#   Switch B  long   →        PAGE DOWN    (prev_lane)
 #
-# Press behaviour: messages fire on SHORT RELEASE (not on physical
-# press-down). When a button has both `actions` and `actionsHold`,
-# PySwitch delays firing `actions` until it confirms the press was
-# short, so the correct CC fires even for adjacent short/long gestures.
-# Value 127 is sent on activation; no release (value 0) message is sent,
-# matching the stock nano4config behaviour.
+# LED behavior:
+#   Buttons A and B are "dynamic: true" — their LED color and corner label
+#   are driven by dynamic_leds.json based on the Ultra8 function currently
+#   assigned to each button and the live lane state from SysEx snapshots.
+#   Buttons 1 and 2 use a fixed color defined in the JSON config.
+#
+# Press behaviour: messages fire on SHORT RELEASE.  When a button has both
+# `actions` and `actionsHold`, PySwitch delays firing `actions` until the
+# press is confirmed short.  Value 127 sent on activation; no release CC.
 #
 ##############################################################################
 
 from pyswitch.hardware.devices.pa_midicaptain_nano_4 import *
 from pyswitch.clients.local.actions.custom import CUSTOM_MESSAGE
-from pyswitch.clients.ultra8.actions.lane_state import ULTRA8_LANE_STATE
-from pyswitch.clients.ultra8.actions.labeled_button import ULTRA8_LABELED_BUTTON
+from pyswitch.clients.ultra8.actions.lane_action import ULTRA8_LANE_ACTION
 from pyswitch.clients.ultra8.actions.page_nav import ULTRA8_PAGE_NAV
 from pyswitch.clients.ultra8 import page_state as _page_state
 from pyswitch.colors import Colors
+from pyswitch.clients.ultra8.lane_config import load_lane_config, load_default_lane, get_gesture
 from display import DISPLAY_HEADER_1, DISPLAY_HEADER_2, DISPLAY_FOOTER_1, DISPLAY_FOOTER_2
-from ultra8_config import DEFAULT_PAGE
 
-# ── MIDI helpers ─────────────────────────────────────────────────────────────
+# Lane number (1-indexed) read from nano4_button_maps/default_lane.txt at boot.
+# Falls back to the lowest-numbered lane_<n>.json, then to lane 1.
+DEFAULT_PAGE = load_default_lane()
+
+
+# ── MIDI helper ───────────────────────────────────────────────────────────────
 
 def _cc(number):
     """Return a callable that produces CC bytes on the *current* lane channel.
@@ -55,106 +67,190 @@ def _cc(number):
     return _make
 
 
-# ── Inputs ───────────────────────────────────────────────────────────────────
+# ── Load lane JSON config ─────────────────────────────────────────────────────
+#
+# Reads nano4_button_maps/lane_<DEFAULT_PAGE>.json.  On error (file missing,
+# bad JSON) load_lane_config() logs to serial and returns None — all helpers
+# below then return safe fallback values so the device boots with functional
+# defaults even if the JSON file is unavailable.
+
+_config = load_lane_config(DEFAULT_PAGE)
+
+
+def _cc_index(button, gesture, fallback):
+    """Return the CC index (int) for a button gesture from the loaded config.
+    Falls back to `fallback` if config is None or the field is absent.
+    """
+    g = get_gesture(_config, button, gesture)
+    v = g.get("index")
+    return v if isinstance(v, int) else fallback
+
+
+def _btn_label(button):
+    """Return the tier-2 label from the JSON button object (may be None)."""
+    g = get_gesture(_config, button, "short")
+    return g.get("label", None)
+
+
+def _btn_color(button, fallback_name="WHITE"):
+    """Return the LED Color tuple for a button from JSON."""
+    g = get_gesture(_config, button, "short")
+    name = g.get("color", fallback_name)
+    return getattr(Colors, name, Colors.WHITE)
+
+
+def _btn_brightness(button, fallback=0.3):
+    """Return the LED brightness for a button from JSON."""
+    g = get_gesture(_config, button, "short")
+    return g.get("led_brightness", fallback)
+
+
+# ── Resolved CC numbers ───────────────────────────────────────────────────────
+# Default values match the pre-Phase-4 hardcoded assignments.
+
+_CC_A_SHORT = _cc_index("A", "short", 20)   # REC/PLY
+_CC_A_LONG  = _cc_index("A", "long",  21)   # CLR
+_CC_1_SHORT = _cc_index("1", "short", 22)   # (label via SysEx match)
+_CC_1_LONG  = _cc_index("1", "long",  23)   # MON
+_CC_2_SHORT = _cc_index("2", "short", 25)   # STOP-LANE
+_CC_B_SHORT = _cc_index("B", "short", 24)   # (label via SysEx match)
+
+# PAGE NAV direction from JSON internal index ("next_lane" / "prev_lane")
+# Falls back to +1 / -1 if JSON is unavailable.
+def _nav_direction(button, gesture, default_direction):
+    g = get_gesture(_config, button, gesture)
+    idx = g.get("index")
+    if idx == "next_lane":
+        return +1
+    if idx == "prev_lane":
+        return -1
+    return default_direction
+
+_DIR_2_LONG = _nav_direction("2", "long", +1)   # Switch 2 long: PAGE UP
+_DIR_B_LONG = _nav_direction("B", "long", -1)   # Switch B long: PAGE DOWN
+
+
+# ── Label helpers for non-dynamic buttons ─────────────────────────────────────
+
+def _short_label(button, cc_number):
+    """Tier-2/1 label for a short-press action.
+
+    Returns the JSON button.label if present (tier-2), otherwise the
+    auto-fallback "CC{N}" (tier-1).  The JSON label is a button-level
+    field and only applies to the primary (short) gesture.
+    """
+    tier2 = get_gesture(_config, button, "short").get("label", None)
+    return tier2 if tier2 is not None else "CC{}".format(cc_number)
+
+
+# ── Inputs ────────────────────────────────────────────────────────────────────
 
 Inputs = [
 
     # ── Switch 1 (back-left) ─────────────────────────────────────────────────
     # Short: CC22   Long: MON (CC23)
-    # Corner label owned by the short-press action only; hold gets display=None
-    # so it never overwrites the short-press label between presses.
+    # Not dynamic — fixed color LED, tier-1/2 label only.
+    # Hold does not own LEDs or corner label (short-press action owns them).
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_1,
         "actions": [
-            ULTRA8_LABELED_BUTTON(
-                control_id     = 4,          # UNDO — label tracks Ultra8 assignment for CC22
-                message        = _cc(22),
-                color          = Colors.YELLOW,
-                led_brightness = 0.3,
+            CUSTOM_MESSAGE(
+                message        = _cc(_CC_1_SHORT),
+                text           = _short_label("1", _CC_1_SHORT),
+                color          = _btn_color("1", "YELLOW"),
+                led_brightness = _btn_brightness("1", 0.3),
                 display        = DISPLAY_HEADER_1,
             ),
         ],
         "actionsHold": [
-            ULTRA8_LABELED_BUTTON(
-                control_id     = 3,          # MON
-                message        = _cc(23),
+            CUSTOM_MESSAGE(
+                message        = _cc(_CC_1_LONG),
+                text           = "CC{}".format(_CC_1_LONG),   # hold: always tier-1
                 color          = Colors.BLUE,
                 led_brightness = 0.3,
-                display        = None,        # hold does not own the corner label
-                use_leds       = False,       # all 3 NeoPixels belong to short action
+                display        = None,    # hold does not own the corner label
+                use_leds       = False,   # LEDs belong to short action
             ),
         ],
     },
 
     # ── Switch 2 (back-right) ────────────────────────────────────────────────
     # Short: STOP-LANE (CC25)   Long: PAGE UP
-    # Hold does not own the corner label or LEDs (short-press action owns them).
+    # Not dynamic — fixed color, JSON label ("STOP") or auto-fallback.
+    # Hold does not own LEDs or corner label.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_2,
         "actions": [
             CUSTOM_MESSAGE(
-                message        = _cc(25),
-                text           = "STOP",
-                color          = Colors.ORANGE,
-                led_brightness = 0.3,
+                message        = _cc(_CC_2_SHORT),
+                text           = _short_label("2", _CC_2_SHORT),
+                color          = _btn_color("2", "ORANGE"),
+                led_brightness = _btn_brightness("2", 0.3),
                 display        = DISPLAY_HEADER_2,
             ),
         ],
         "actionsHold": [
             ULTRA8_PAGE_NAV(
-                direction      = +1,
-                display        = None,        # hold does not own the corner label
-                use_leds       = False,       # LEDs belong to short action
+                direction      = _DIR_2_LONG,
+                display        = None,    # hold does not own corner label
+                use_leds       = False,   # LEDs belong to short action
             ),
         ],
     },
 
     # ── Switch A (front-left) ────────────────────────────────────────────────
-    # Short: REC/PLY (CC20) — LED driven by Ultra8 feedback, not local state.
-    # Long:  CLR (CC21)
+    # Short: REC/PLY (CC20) — dynamic LED + tier-3 label + center display.
+    # Long:  CLR (CC21) — fixed CUSTOM_MESSAGE; hold does not own LEDs.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
         "actions": [
-            ULTRA8_LANE_STATE(
-                lane       = DEFAULT_PAGE - 1,  # boot-default fallback; overridden at
-                                                # runtime by page_state inside lane_state.py
-                message    = _cc(20),
-                control_id = 0,                 # REC_PLY — drives corner label
-                text       = "REC/PLY",         # static fallback before assignment arrives
-                display    = DISPLAY_FOOTER_1,
+            ULTRA8_LANE_ACTION(
+                message        = _cc(_CC_A_SHORT),
+                cc_number      = _CC_A_SHORT,
+                label          = _btn_label("A"),       # tier-2: "REC/PLY" from JSON
+                color          = _btn_color("A", "DARK_GRAY"),
+                led_brightness = _btn_brightness("A", 0.3),
+                dynamic        = True,
+                drives_display = True,                  # owns center DISPLAY_* labels
+                lane           = DEFAULT_PAGE - 1,
+                display        = DISPLAY_FOOTER_1,
             ),
         ],
         "actionsHold": [
-            ULTRA8_LABELED_BUTTON(
-                control_id     = 2,          # CLR
-                message        = _cc(21),
+            CUSTOM_MESSAGE(
+                message        = _cc(_CC_A_LONG),
+                text           = "CC{}".format(_CC_A_LONG),   # hold: always tier-1
                 color          = Colors.PURPLE,
                 led_brightness = 0.3,
-                display        = None,        # hold does not own the corner label
-                use_leds       = False,       # all 3 NeoPixels belong to ULTRA8_LANE_STATE
+                display        = None,    # hold does not own corner label
+                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION
             ),
         ],
     },
 
     # ── Switch B (front-right) ───────────────────────────────────────────────
-    # Short: CC24   Long: PAGE DOWN
-    # Hold does not own the corner label or LEDs (short-press action owns them).
+    # Short: CC24 — dynamic LED + tier-3 label.
+    # Long:  PAGE DOWN
+    # Hold does not own LEDs or corner label.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_B,
         "actions": [
-            ULTRA8_LABELED_BUTTON(
-                control_id     = 1,          # PLAY — label tracks Ultra8 assignment for CC24
-                message        = _cc(24),
-                color          = Colors.LIGHT_GREEN,
-                led_brightness = 0.3,
+            ULTRA8_LANE_ACTION(
+                message        = _cc(_CC_B_SHORT),
+                cc_number      = _CC_B_SHORT,
+                label          = _btn_label("B"),       # tier-2: None (no label in JSON)
+                color          = _btn_color("B", "DARK_GRAY"),
+                led_brightness = _btn_brightness("B", 0.3),
+                dynamic        = True,
+                drives_display = False,                 # center display owned by Switch A
                 display        = DISPLAY_FOOTER_2,
             ),
         ],
         "actionsHold": [
             ULTRA8_PAGE_NAV(
-                direction      = -1,
-                display        = None,        # hold does not own the corner label
-                use_leds       = False,       # LEDs belong to short action
+                direction      = _DIR_B_LONG,
+                display        = None,    # hold does not own corner label
+                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION
             ),
         ],
     },

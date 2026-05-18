@@ -1,0 +1,67 @@
+{
+  "functions": {
+
+    "REC_PLY": {
+      "description": "Record / Play / Overdub toggle — the primary lane control button.",
+      "states": {
+        "recording":   { "color": "RED",          "brightness": 0.3  },
+        "overdubbing": { "color": "RED",          "brightness": 0.3  },
+        "playing":     { "color": "BLUE",         "brightness": 0.3  },
+        "stopped":     { "color": "DARK_GRAY",    "brightness": 0.15 },
+        "empty":       { "color": "BLACK",        "brightness": 0.02 },
+        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 },
+        "error":       { "color": "PURPLE",       "brightness": 0.3  }
+      }
+    },
+
+    "PLY_STP": {
+      "description": "Play / Stop toggle.",
+      "states": {
+        "recording":   { "color": "RED",          "brightness": 0.3  },
+        "overdubbing": { "color": "RED",          "brightness": 0.3  },
+        "playing":     { "color": "BLUE",         "brightness": 0.3  },
+        "stopped":     { "color": "DARK_GRAY",    "brightness": 0.15 },
+        "empty":       { "color": "BLACK",        "brightness": 0.02 },
+        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 },
+        "error":       { "color": "PURPLE",       "brightness": 0.3  }
+      }
+    },
+
+    "CLR": {
+      "description": "Clear lane. Lit when there is audio content to clear.",
+      "states": {
+        "has_audio":   { "color": "PURPLE",       "brightness": 0.3  },
+        "empty":       { "color": "DARK_PURPLE",  "brightness": 0.1  },
+        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+      }
+    },
+
+    "MON": {
+      "description": "Monitor / speaker toggle.",
+      "states": {
+        "active":      { "color": "BLUE",         "brightness": 0.3  },
+        "inactive":    { "color": "DARK_BLUE",    "brightness": 0.1  },
+        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+      }
+    },
+
+    "UNDO": {
+      "description": "Undo last destructive action. Lit when undo stack is non-empty.",
+      "states": {
+        "available":   { "color": "YELLOW",       "brightness": 0.3  },
+        "unavailable": { "color": "DARK_YELLOW",  "brightness": 0.1  },
+        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+      }
+    },
+
+    "REDO": {
+      "description": "Redo (future — not yet in Ultra8 protocol). Lit when redo stack is non-empty.",
+      "states": {
+        "available":   { "color": "YELLOW",       "brightness": 0.3  },
+        "unavailable": { "color": "DARK_YELLOW",  "brightness": 0.1  },
+        "waiting":     { "color": "DARK_GRAY",    "brightness": 0.02 }
+      }
+    }
+
+  }
+}
