@@ -7,8 +7,8 @@
         "recording":   { "color": "RED",           "brightness": 0.5,  "label": "PLAY"  },
         "overdubbing": { "color": "RED",           "brightness": 0.5,  "label": "PLAY"  },
         "playing":     { "color": "RED",           "brightness": 0.05,  "label": "REC" },
-        "stopped":     { "color": "RED",     "brightness": 0.15, "label": "REC"  },
-        "empty":       { "color": "RED",     "brightness": 0.15, "label": "REC"  },
+        "stopped":     { "color": "RED",           "brightness": 0.05, "label": "REC"  },
+        "empty":       { "color": "RED",           "brightness": 0.05, "label": "REC"  },
         "waiting":     { "color": "DARK_GRAY",     "brightness": 0.02, "label": null   },
         "error":       { "color": "PURPLE",        "brightness": 0.3,  "label": null   }
       }
@@ -17,8 +17,8 @@
     "PLY_STP": {
       "description": "Play / Stop toggle.",
       "states": {
-        "recording":   { "color": "DARK_GREEN",           "brightness": 0.05,  "label": "PLAY"  },
-        "overdubbing": { "color": "DARK_GREEN",           "brightness": 0.05,  "label": "PLAY"  },
+        "recording":   { "color": "DARK_GREEN",    "brightness": 0.05,  "label": "PLAY"  },
+        "overdubbing": { "color": "DARK_GREEN",    "brightness": 0.05,  "label": "PLAY"  },
         "playing":     { "color": "DARK_GREEN",    "brightness": 0.5,  "label": "STOP"  },
         "stopped":     { "color": "DARK_GRAY",     "brightness": 0.05, "label": "PLAY"  },
         "empty":       { "color": "DARK_GRAY",     "brightness": 0.05, "label": null  },
@@ -48,10 +48,10 @@
     "UNDO": {
       "description": "Undo / Redo toggle. State reflects what the next press will do.",
       "states": {
-        "available":       { "color": "DARK_BLUE",        "brightness": 0.05,  "label": "UNDO" },
-        "redo_available":  { "color": "DARK_BLUE",       "brightness": 0.5,  "label": "REDO" },
-        "unavailable":     { "color": "DARK_GRAY",        "brightness": 0.05, "label": "UNDO" },
-        "waiting":         { "color": "DARK_GRAY",        "brightness": 0.02, "label": null   }
+        "available":       { "color": "DARK_BLUE",     "brightness": 0.05,  "label": "UNDO" },
+        "redo_available":  { "color": "DARK_BLUE",     "brightness": 0.5,  "label": "REDO" },
+        "unavailable":     { "color": "DARK_GRAY",     "brightness": 0.05, "label": "UNDO" },
+        "waiting":         { "color": "DARK_GRAY",     "brightness": 0.02, "label": null   }
       }
     },
 
@@ -68,7 +68,7 @@
       "description": "Reverse toggle. Lit (orange) when the loop is currently playing in reverse.",
       "states": {
         "active":   { "color": "ORANGE",    "brightness": 0.5,  "label": "FORWARD" },
-        "inactive": { "color": "ORANGE", "brightness": 0.05,  "label": "REVERSE" },
+        "inactive": { "color": "ORANGE",    "brightness": 0.05,  "label": "REVERSE" },
         "waiting":  { "color": "DARK_GRAY", "brightness": 0.02, "label": null  }
       }
     }
