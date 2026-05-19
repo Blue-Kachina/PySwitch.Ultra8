@@ -142,6 +142,35 @@ def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
         return "waiting"
 
 
+def _predict_state_name(function_name, current_state_name):
+    """Return the optimistically predicted state_name after a button press.
+
+    Returns None if no reliable prediction exists for this (function, state)
+    combination — the caller should skip the optimistic update in that case.
+    """
+    if function_name == "REC_PLY":
+        if current_state_name in ("recording", "overdubbing"):
+            return "playing"
+        elif current_state_name == "playing":
+            return "overdubbing"
+        elif current_state_name in ("stopped", "empty"):
+            return "recording"
+    elif function_name == "PLY_STP":
+        if current_state_name == "playing":
+            return "stopped"
+        elif current_state_name in ("stopped", "recording", "overdubbing"):
+            return "playing"
+    elif function_name == "CLR":
+        return "empty"
+    elif function_name == "UNDO":
+        if current_state_name == "available":
+            return "redo_available"
+        elif current_state_name == "redo_available":
+            return "available"
+    # Unknown functions or UNDO with unavailable state: no prediction
+    return None
+
+
 # ── Public factory ────────────────────────────────────────────────────────────
 
 def ULTRA8_LANE_ACTION(
@@ -216,6 +245,11 @@ class _LaneActionCallback(Callback):
         # Last resolved dynamic_leds state entry — shared between LED and label
         self._current_led_entry = None  # dict with "color", "brightness", "label"
 
+        # Optimistic state — set on push(), cleared when snapshot seq advances.
+        # Structured as a dict with keys "state_name" and "seq" (seq at time of press).
+        # None means no pending optimistic update.
+        self._optimistic = None
+
         # Modules and data loaded in init()
         self._page_state   = None
         self._assignments  = None
@@ -272,6 +306,23 @@ class _LaneActionCallback(Callback):
         msg = self._message() if callable(self._message) else self._message
         self._appl.client.midi.send(self._RawMessage(msg))
 
+        # Set optimistic state for immediate LED/label feedback (IG-3)
+        if self._dynamic and self._dynamic_function is not None:
+            protocol = self._appl.client.protocol
+            lane = (self._page_state.get() - 1) if self._page_state else self._lane_fallback
+            if protocol.snapshot is not None:
+                lb = protocol.snapshot.lanes[lane]
+                current_name = _state_to_name(
+                    self._dynamic_function,
+                    lb.state, lb.dirty, lb.reverse, lb.undo_redo_state,
+                )
+                predicted = _predict_state_name(self._dynamic_function, current_name)
+                if predicted is not None:
+                    self._optimistic = {
+                        "state_name": predicted,
+                        "seq":        protocol.snapshot.seq,
+                    }
+
     def release(self):
         if self._message_release:
             msg = self._message_release() if callable(self._message_release) else self._message_release
@@ -319,7 +370,7 @@ class _LaneActionCallback(Callback):
         if protocol.snapshot is None:
             if self._state_label:
                 self._state_label.text_color = Colors.DARK_GRAY
-                self._state_label.text       = "wait"
+                self._state_label.text       = "WAITING"
             if self._progress_label:
                 self._progress_label.text = ""
             if self._seq_label:
@@ -333,23 +384,23 @@ class _LaneActionCallback(Callback):
         seq        = protocol.snapshot.seq
 
         if state == _STATE_RECORDING:
-            state_text  = "REC"
+            state_text  = "RECORDING"
             state_color = Colors.RED
             progress    = ""
         elif state == _STATE_OVERDUBBING:
-            state_text  = "OVDB"
+            state_text  = "OVERDUBBING"   # verify width on hardware; fallback: "OVERDUB"
             state_color = Colors.RED
             progress    = _make_bar(loop_phase)
         elif state == _STATE_PLAYING:
-            state_text  = "PLY"
+            state_text  = "PLAYING"
             state_color = Colors.LIGHT_GREEN
             progress    = _make_bar(loop_phase)
         elif state == _STATE_STOPPED:
-            state_text  = "STP" if dirty else "---"
+            state_text  = "STOPPED" if dirty else "EMPTY"
             state_color = Colors.DARK_GRAY
             progress    = ""
         else:
-            state_text  = "ERR"
+            state_text  = "ERROR"
             state_color = Colors.PURPLE
             progress    = ""
 
@@ -377,22 +428,30 @@ class _LaneActionCallback(Callback):
             if fn is not None:
                 self._dynamic_function = fn
 
-        # Step 2: map lane block to a state name
+        # Optimistic state override (IG-3): use predicted state if snapshot has not
+        # advanced since the button was pressed. Clear the override once it has.
+        if self._optimistic is not None:
+            if protocol.snapshot is not None and protocol.snapshot.seq != self._optimistic["seq"]:
+                # New snapshot arrived — authoritative state takes over, clear override.
+                self._optimistic = None
+
+        # Step 2: map lane block to a state name (uses optimistic if active)
         if protocol.snapshot is None:
             state_name = "waiting"
-        else:
+        elif self._optimistic is not None:
+            state_name = self._optimistic["state_name"]
+        elif self._dynamic_function:
             lb = protocol.snapshot.lanes[lane]
-            if self._dynamic_function:
-                state_name = _state_to_name(
-                    self._dynamic_function,
-                    lb.state,
-                    lb.dirty,
-                    lb.reverse,
-                    lb.undo_redo_state,
-                )
-            else:
-                # Function not yet known — use generic waiting state
-                state_name = "waiting"
+            state_name = _state_to_name(
+                self._dynamic_function,
+                lb.state,
+                lb.dirty,
+                lb.reverse,
+                lb.undo_redo_state,
+            )
+        else:
+            # Function not yet known — use generic waiting state
+            state_name = "waiting"
 
         # Step 3: look up LED entry in dynamic_leds.json
         led_entry = None

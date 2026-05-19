@@ -32,7 +32,8 @@
 #
 # Font notes:
 #   PTSans-NarrowBold-40.pcf — 40px, used for state name (DISPLAY_STATE).
-#       Short labels (REC / PLY / OVDB / STP / ---) fit comfortably at 240px width.
+#       Labels: PLAYING / RECORDING / STOPPED / EMPTY fit comfortably at 240px width.
+#       OVERDUBBING (11 chars) is the widest — verify on hardware; use OVERDUB if it clips.
 #   H20.pcf — 20px, used for lane label, progress bar, seq counter.
 #   Adjust bounds if any font renders taller than expected.
 #
@@ -86,12 +87,13 @@ DISPLAY_FOOTER_2 = DisplayLabel(           # Switch B, front-right
 # ── Center dynamic labels (exported for lane_action.py to update) ──────────────
 
 # Primary state name — large, coloured text.
-# Updated by lane_action.py to: "REC", "PLY", "OVDB", "STP", "---", "wait", "ERR"
+# Updated by lane_action.py to: "PLAYING", "RECORDING", "OVERDUBBING", "STOPPED", "EMPTY", "WAITING", "ERROR"
+# Note: "OVERDUBBING" is the widest string at 40px narrow bold — verify on hardware; fallback is "OVERDUB".
 DISPLAY_STATE = DisplayLabel(
     bounds = DisplayBounds(0, 78, _W, 65),
     layout = {
         "font":      "/fonts/PTSans-NarrowBold-40.pcf",
-        "text":      "wait",
+        "text":      "WAITING",
         "textColor": Colors.DARK_GRAY,
     },
 )
