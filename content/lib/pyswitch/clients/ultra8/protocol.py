@@ -25,9 +25,9 @@
 #   1. manufacturer_id  == bytes([0x7D])
 #   2. data[0]          == 0x55            (protocol ID)
 #   3. data[1]          == 0x02            (msg_type: assignment)
-#   4. len(data)        == 20              (total packet 23 bytes)
+#   4. len(data)        == 23              (total packet 26 bytes, 6 controls)
 #   5. seq != last accepted assignment seq (duplicate suppression)
-#   6. data[4]          == 5               (num_controls; must be 5 in v0.1)
+#   6. data[4]          == 6               (num_controls; must be 6)
 #   Any failure → silently discard; last accepted state is retained.
 #
 ##############################################################################
@@ -44,7 +44,7 @@ _MSG_TYPE_ASSIGN    = 0x02            # Assignment message (Unit 6.4)
 
 # Expected data lengths (= total packet bytes − 3 framing bytes: F0 mfr F7)
 _SNAPSHOT_DATA_LEN  = 30              # 33-byte packet
-_ASSIGN_DATA_LEN    = 20              # 23-byte packet
+_ASSIGN_DATA_LEN    = 23              # 26-byte packet (6 controls)
 
 _NUM_LANES          = 8
 
@@ -64,10 +64,18 @@ class _LaneBlock:
       bits 2:0  lane_index      — sanity check, must equal block position N
       bits 4:3  undo_redo_state — 0=none, 1=undo available, 2=redo available
       bits 6:5  reserved
+
+    lane_flags byte layout (byte +1 of each block):
+      bits 1:0  state           — lane state enum (0=stopped 1=playing 2=recording 3=overdubbing)
+      bit  2    dirty           — 1 = lane has recorded audio
+      bit  3    selected        — 1 = this is the selected lane
+      bits 5:4  reserved (monmode removed)
+      bit  6    reverse         — 1 = loop is currently playing in reverse (rev_active)
+      bit  7    always 0 (7-bit MIDI safety)
     """
 
     __slots__ = ("lane_index", "state", "dirty", "selected",
-                 "monmode", "undo_redo_state", "loop_phase")
+                 "reverse", "undo_redo_state", "loop_phase")
 
     def __init__(self, lane_info, flags, loop_phase):
         self.lane_index      = lane_info & 0x07
@@ -75,14 +83,14 @@ class _LaneBlock:
         self.state           =  flags           & 0x03
         self.dirty           = (flags >> 2)     & 0x01
         self.selected        = (flags >> 3)     & 0x01
-        self.monmode         = (flags >> 4)     & 0x03
+        self.reverse         = (flags >> 6)     & 0x01   # rev_active: 0=forward 1=reversed
         self.loop_phase      = loop_phase
 
     def __repr__(self):
         return (
-            "_LaneBlock(lane={} state={} dirty={} sel={} mon={} undo_redo={} phase={})".format(
+            "_LaneBlock(lane={} state={} dirty={} sel={} rev={} undo_redo={} phase={})".format(
                 self.lane_index, self.state, self.dirty,
-                self.selected, self.monmode, self.undo_redo_state, self.loop_phase
+                self.selected, self.reverse, self.undo_redo_state, self.loop_phase
             )
         )
 
@@ -263,7 +271,7 @@ class Ultra8Protocol:
 
         # ── num_controls validation ───────────────────────────────────────
         num_controls = data[4]
-        if num_controls != 5:
+        if num_controls != 6:
             if self.debug:
                 print("U8 proto [assign]: unexpected num_controls", num_controls)
             return False

@@ -47,7 +47,8 @@
 #   Function-specific state mapping is handled by _state_to_name():
 #     REC_PLY / PLY_STP: use above enum mapping
 #     CLR:               "has_audio" if dirty else "empty"
-#     MON:               "active" if monmode else "inactive"
+#     REV:               "active" if reverse else "inactive"
+#     UNDO:              "available" / "redo_available" / "unavailable"
 #     others:            "waiting" (safe fallback)
 #
 # ── Usage in inputs.py ────────────────────────────────────────────────────────
@@ -102,15 +103,18 @@ def _make_bar(loop_phase):
     return "█" * filled + "░" * (_BAR_WIDTH - filled)
 
 
-def _state_to_name(function_name, state, dirty, monmode, undo_redo_state=0):
+def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
     """Map a snapshot lane block to a dynamic_leds state name.
 
     Different function types use different dimensions of the lane block:
       REC_PLY / PLY_STP  — lane recording state enum
       CLR                — dirty flag (has audio content)
-      MON                — monmode flag
+      REV                — reverse flag (1 = loop is playing in reverse)
       UNDO               — undo_redo_state (0=none, 1=undo available, 2=redo available)
       others             — "waiting" (safe unknown fallback)
+
+    Note: MON is no longer resolved here; monmode was removed from the SysEx
+    protocol in favour of the reverse bit. MON buttons will show "waiting".
     """
     if function_name in ("REC_PLY", "PLY_STP"):
         if state == _STATE_STOPPED:
@@ -125,8 +129,8 @@ def _state_to_name(function_name, state, dirty, monmode, undo_redo_state=0):
             return "error"
     elif function_name == "CLR":
         return "has_audio" if dirty else "empty"
-    elif function_name == "MON":
-        return "active" if monmode else "inactive"
+    elif function_name == "REV":
+        return "active" if reverse else "inactive"
     elif function_name == "UNDO":
         if undo_redo_state == 1:
             return "available"
@@ -383,7 +387,7 @@ class _LaneActionCallback(Callback):
                     self._dynamic_function,
                     lb.state,
                     lb.dirty,
-                    lb.monmode,
+                    lb.reverse,
                     lb.undo_redo_state,
                 )
             else:

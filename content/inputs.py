@@ -23,16 +23,15 @@
 #   Switch A  long   → CC 21  (CLR)
 #   Switch 1  short  → CC 22
 #   Switch 1  long   → CC 23  (MON)
-#   Switch 2  short  → CC 25  (STOP-LANE)
+#   Switch 2  short  → CC 25  (REV)
 #   Switch 2  long   →        PAGE UP      (next_lane)
 #   Switch B  short  → CC 24
 #   Switch B  long   →        PAGE DOWN    (prev_lane)
 #
 # LED behavior:
-#   Buttons A, B, and 1 are "dynamic: true" — their LED color and corner label
+#   All four buttons are "dynamic: true" — their LED color and corner label
 #   are driven by dynamic_leds.json based on the Ultra8 function currently
 #   assigned to each button and the live lane state from SysEx snapshots.
-#   Button 2 uses a fixed color defined in the JSON config.
 #
 # Press behaviour: messages fire on SHORT RELEASE.  When a button has both
 # `actions` and `actionsHold`, PySwitch delays firing `actions` until the
@@ -183,17 +182,24 @@ Inputs = [
     },
 
     # ── Switch 2 (back-right) ────────────────────────────────────────────────
-    # Short: STOP-LANE (CC25)   Long: PAGE UP
-    # Not dynamic — fixed color, JSON label ("STOP") or auto-fallback.
+    # Short: REV (CC25) — dynamic LED + tier-3 label from dynamic_leds.json.
+    # Long:  PAGE UP
+    # LED reflects rev_active from SysEx snapshot (lit orange when loop is
+    # reversed, dim when forward). Corner label resolves to "REV" once the
+    # assignment message arrives; falls back to "REV" (tier-2 JSON label).
     # Hold does not own LEDs or corner label.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_2,
         "actions": [
-            CUSTOM_MESSAGE(
+            ULTRA8_LANE_ACTION(
                 message        = _cc(_CC_2_SHORT),
-                text           = _short_label("2", _CC_2_SHORT),
+                cc_number      = _CC_2_SHORT,
+                label          = _btn_label("2"),       # tier-2: "REV" from JSON
                 color          = _btn_color("2", "ORANGE"),
                 led_brightness = _btn_brightness("2", 0.3),
+                dynamic        = True,
+                drives_display = False,                 # center display owned by Switch A
+                lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_HEADER_2,
             ),
         ],
@@ -201,7 +207,7 @@ Inputs = [
             ULTRA8_PAGE_NAV(
                 direction      = _DIR_2_LONG,
                 display        = None,    # hold does not own corner label
-                use_leds       = False,   # LEDs belong to short action
+                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION
             ),
         ],
     },

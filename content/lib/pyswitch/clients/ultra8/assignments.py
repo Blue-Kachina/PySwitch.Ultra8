@@ -27,6 +27,7 @@ _NAMES = {
     2: "CLR",
     3: "MON",
     4: "UNDO",
+    5: "REV",
 }
 
 # ── Control ID → internal function name ────────────────────────────────────
@@ -38,6 +39,7 @@ _FUNCTION_NAMES = {
     2: "CLR",
     3: "MON",
     4: "UNDO",
+    5: "REV",
 }
 
 # ── Internal function name → display label ─────────────────────────────────
@@ -49,6 +51,7 @@ _DISPLAY_LABELS = {
     "MON":     "MON",
     "UNDO":    "UNDO",
     "REDO":    "REDO",
+    "REV":     "REV",
 }
 
 # Fallback shown before the first assignment message is received.
