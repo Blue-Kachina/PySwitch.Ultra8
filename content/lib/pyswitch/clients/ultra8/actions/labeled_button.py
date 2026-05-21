@@ -16,7 +16,7 @@
 #
 # Control ID → default label (before any assignment message arrives):
 #   0 → "REC/PLY"   1 → "PLY/STP"   2 → "CLR"
-#   3 → "MON"       4 → "UNDO"
+#   3 → "MON"       4 → "UNDO_REDO"
 #
 # Usage in inputs.py:
 #   from pyswitch.clients.ultra8.actions.labeled_button import ULTRA8_LABELED_BUTTON

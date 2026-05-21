@@ -11,7 +11,7 @@
 #       On button press, sends a raw CC byte sequence to Ultra8.
 #
 #   LED (dynamic=True):
-#       Drives NeoPixels from dynamic_leds.json based on:
+#       Drives NeoPixels from leds.json based on:
 #         1. Which Ultra8 function is currently mapped to this button's CC,
 #            discovered by matching against incoming SysEx assignment messages
 #            (msg_type=0x02) — no pre-declared control_id required.
@@ -33,7 +33,7 @@
 #       from the current lane snapshot each cycle (same logic as the former
 #       ULTRA8_LANE_STATE).
 #
-# ── State names for dynamic_leds.json ────────────────────────────────────────
+# ── State names for leds.json ────────────────────────────────────────────────
 #
 #   Snapshot state enum:
 #     0 (STOPPED, dirty=False) → "empty"
@@ -104,7 +104,7 @@ def _make_bar(loop_phase):
 
 
 def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
-    """Map a snapshot lane block to a dynamic_leds state name.
+    """Map a snapshot lane block to a leds.json state name.
 
     Different function types use different dimensions of the lane block:
       REC_PLY / PLY_STP  — lane recording state enum
@@ -113,8 +113,6 @@ def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
       UNDO               — undo_redo_state (0=none, 1=undo available, 2=redo available)
       others             — "waiting" (safe unknown fallback)
 
-    Note: MON is no longer resolved here; monmode was removed from the SysEx
-    protocol in favour of the reverse bit. MON buttons will show "waiting".
     """
     if function_name in ("REC_PLY", "PLY_STP"):
         if state == _STATE_STOPPED:
@@ -131,7 +129,7 @@ def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
         return "has_audio" if dirty else "empty"
     elif function_name == "REV":
         return "active" if reverse else "inactive"
-    elif function_name == "UNDO":
+    elif function_name == "UNDO_REDO":
         if undo_redo_state == 1:
             return "available"
         elif undo_redo_state == 2:
@@ -142,33 +140,47 @@ def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
         return "waiting"
 
 
-def _predict_state_name(function_name, current_state_name):
-    """Return the optimistically predicted state_name after a button press.
+# ── Optimistic press-delta table ─────────────────────────────────────────────
+#
+# Maps (function_name, current_state_name) → (state, dirty, reverse, undo_redo_state)
+# describing the predicted lane block immediately after a button press.
+#
+# None in a slot means "keep this field from the current snapshot unchanged".
+# When a button is pressed, the matching delta is merged with the current lane
+# block and written to the shared optimistic_lane store so that ALL buttons on
+# the lane update instantly — not just the one that was pressed.
+#
+# Omitted combinations (e.g. CLR on "empty") produce no prediction; the buttons
+# hold their pre-press state until the next real SysEx snapshot arrives.
 
-    Returns None if no reliable prediction exists for this (function, state)
-    combination — the caller should skip the optimistic update in that case.
-    """
-    if function_name == "REC_PLY":
-        if current_state_name in ("recording", "overdubbing"):
-            return "playing"
-        elif current_state_name == "playing":
-            return "overdubbing"
-        elif current_state_name in ("stopped", "empty"):
-            return "recording"
-    elif function_name == "PLY_STP":
-        if current_state_name == "playing":
-            return "stopped"
-        elif current_state_name in ("stopped", "recording", "overdubbing"):
-            return "playing"
-    elif function_name == "CLR":
-        return "empty"
-    elif function_name == "UNDO":
-        if current_state_name == "available":
-            return "redo_available"
-        elif current_state_name == "redo_available":
-            return "available"
-    # Unknown functions or UNDO with unavailable state: no prediction
-    return None
+_PRESS_DELTA = {
+    # ── REC_PLY ──────────────────────────────────────────────────────────────
+    ("REC_PLY", "empty"):       (_STATE_RECORDING,   False, None, None),
+    ("REC_PLY", "stopped"):     (_STATE_OVERDUBBING, True,  None, None),
+    ("REC_PLY", "playing"):     (_STATE_OVERDUBBING, True,  None, None),
+    ("REC_PLY", "recording"):   (_STATE_PLAYING,     True,  None, None),
+    ("REC_PLY", "overdubbing"): (_STATE_PLAYING,     True,  None, None),
+    ("REC_PLY", "waiting"):     (_STATE_RECORDING,   False, None, None),
+
+    # ── PLY_STP ──────────────────────────────────────────────────────────────
+    ("PLY_STP", "playing"):     (_STATE_STOPPED, True, None, None),
+    ("PLY_STP", "stopped"):     (_STATE_PLAYING, True, None, None),
+    ("PLY_STP", "recording"):   (_STATE_PLAYING, True, None, None),
+    ("PLY_STP", "overdubbing"): (_STATE_PLAYING, True, None, None),
+
+    # ── CLR ──────────────────────────────────────────────────────────────────
+    # CLR stops the lane, clears content, and resets undo/redo and reverse.
+    ("CLR", "has_audio"):       (_STATE_STOPPED, False, False, 0),
+
+    # ── REV ──────────────────────────────────────────────────────────────────
+    ("REV", "inactive"):        (None, None, True,  None),
+    ("REV", "active"):          (None, None, False, None),
+
+    # ── UNDO_REDO ─────────────────────────────────────────────────────────────
+    # After undo, redo becomes available; after redo, undo is available again.
+    ("UNDO_REDO", "available"):      (None, None, None, 2),
+    ("UNDO_REDO", "redo_available"): (None, None, None, 1),
+}
 
 
 # ── Public factory ────────────────────────────────────────────────────────────
@@ -179,7 +191,8 @@ def ULTRA8_LANE_ACTION(
     label          = None,          # Tier-2 label from JSON button.label (may be None)
     color          = Colors.DARK_GRAY,  # Cold-boot / non-dynamic LED color
     led_brightness = 0.3,           # LED brightness [0..1]
-    dynamic        = False,         # True → drive LED from dynamic_leds.json
+    dynamic        = False,         # True → drive LED from leds.json
+    function       = None,          # leds.json function name (e.g. "REC_PLY"); binds at init()
     drives_display = False,         # True → update center display labels each cycle
     lane           = 0,             # Boot-default lane index (0-indexed)
     message_release = None,         # Optional bytes sent on release
@@ -191,6 +204,10 @@ def ULTRA8_LANE_ACTION(
     """
     Send a CC on press.  Drive LED and corner label from JSON config and
     SysEx feedback.  Optionally drive the center lane-state display.
+
+    When `function` is provided (e.g. from the lane JSON "function" key via
+    get_gesture()), the LED function binding is established at init() time
+    without waiting for a SysEx assignment message (~1 s delay eliminated).
     """
     return Action({
         "callback": _LaneActionCallback(
@@ -200,6 +217,7 @@ def ULTRA8_LANE_ACTION(
             color           = color,
             led_brightness  = led_brightness,
             dynamic         = dynamic,
+            function        = function,
             drives_display  = drives_display,
             lane            = lane,
             message_release = message_release,
@@ -222,7 +240,7 @@ class _LaneActionCallback(Callback):
             return self.__data
 
     def __init__(self, message, cc_number, label, color, led_brightness,
-                 dynamic, drives_display, lane, message_release):
+                 dynamic, function, drives_display, lane, message_release):
         super().__init__(mappings=[])
 
         self._message         = message
@@ -232,6 +250,7 @@ class _LaneActionCallback(Callback):
         self._color_fallback  = color           # cold-boot color (already a Colors tuple)
         self._led_brightness  = led_brightness
         self._dynamic         = dynamic
+        self._json_function   = function        # JSON-declared function name; bound at init()
         self._drives_display  = drives_display
         self._lane_fallback   = lane
 
@@ -239,21 +258,22 @@ class _LaneActionCallback(Callback):
         self._current_color      = color
         self._current_brightness = led_brightness
 
-        # Function name discovered via assignment reverse-lookup (tier-3)
+        # Function name: set from _json_function at init(); may be overwritten by
+        # the live SysEx 0x02 assignment reverse-lookup at runtime.
         self._dynamic_function = None   # e.g. "REC_PLY"
 
-        # Last resolved dynamic_leds state entry — shared between LED and label
+        # Default state name from leds.json — applied at init() and used as the
+        # display state when no snapshot has arrived yet.
+        self._default_state_name = None   # e.g. "empty"
+
+        # Last resolved leds.json state entry — shared between LED and label
         self._current_led_entry = None  # dict with "color", "brightness", "label"
 
-        # Optimistic state — set on push(), cleared when snapshot seq advances.
-        # Structured as a dict with keys "state_name" and "seq" (seq at time of press).
-        # None means no pending optimistic update.
-        self._optimistic = None
-
         # Modules and data loaded in init()
-        self._page_state   = None
-        self._assignments  = None
-        self._dynamic_leds = None   # nested dict from dynamic_leds.json
+        self._page_state      = None
+        self._assignments     = None
+        self._dynamic_leds    = None   # nested dict from leds.json
+        self._optimistic_lane = None   # shared optimistic_lane module
 
         # Center-display label refs (set in init())
         self._lane_label     = None   # DISPLAY_LANE:     "Lane N"
@@ -291,14 +311,51 @@ class _LaneActionCallback(Callback):
         except ImportError:
             pass
 
-        # Load dynamic_leds.json once (module-level cache in lane_config.py)
+        # Late-import shared optimistic lane state
+        try:
+            from pyswitch.clients.ultra8 import optimistic_lane
+            self._optimistic_lane = optimistic_lane
+        except ImportError:
+            pass
+
+        # Load leds.json once (module-level cache in lane_config.py)
         if self._dynamic:
             try:
-                from pyswitch.clients.ultra8.lane_config import load_dynamic_leds
+                from pyswitch.clients.ultra8.lane_config import load_dynamic_leds, get_led_default
                 self._dynamic_leds = load_dynamic_leds()
             except (ImportError, Exception) as exc:
                 print("lane_action: could not load dynamic_leds:", exc)
                 self._dynamic_leds = {}
+
+            # Bind function name from JSON at init() time, eliminating the
+            # ~1 s boot delay caused by waiting for the SysEx 0x02 message.
+            # The live SysEx assignment path in _update_dynamic_led() will
+            # still overwrite _dynamic_function if Ultra8 sends a reassignment.
+            if self._json_function is not None:
+                self._dynamic_function = self._json_function
+
+            # Apply the default LED state from leds.json immediately at boot.
+            # This replaces the DARK_GRAY cold-boot fallback for buttons that
+            # declare a function key.
+            if self._dynamic_function is not None and self._dynamic_leds:
+                try:
+                    default_state = get_led_default(self._dynamic_leds, self._dynamic_function)
+                    if default_state is not None:
+                        fn_data = self._dynamic_leds.get(self._dynamic_function, {})
+                        entry = fn_data.get("states", {}).get(default_state)
+                        if entry is not None:
+                            color_name = entry.get("color", "DARK_GRAY")
+                            self._current_color      = getattr(Colors, color_name, Colors.WHITE)
+                            self._current_brightness = entry.get("brightness", self._led_brightness)
+                            self._current_led_entry  = entry
+                            self._default_state_name = default_state
+                        else:
+                            print("lane_action: default state", repr(default_state),
+                                  "not found in leds.json for", self._dynamic_function)
+                    else:
+                        print("lane_action: no default state in leds.json for", self._dynamic_function)
+                except Exception as exc:
+                    print("lane_action: error applying default state:", exc)
 
     # ── Button press / release ────────────────────────────────────────────────
 
@@ -306,22 +363,55 @@ class _LaneActionCallback(Callback):
         msg = self._message() if callable(self._message) else self._message
         self._appl.client.midi.send(self._RawMessage(msg))
 
-        # Set optimistic state for immediate LED/label feedback (IG-3)
-        if self._dynamic and self._dynamic_function is not None:
+        # Publish a predicted lane block to the shared optimistic_lane store so
+        # that all buttons on this lane update instantly and consistently.
+        if (self._dynamic
+                and self._dynamic_function is not None
+                and self._optimistic_lane is not None):
             protocol = self._appl.client.protocol
             lane = (self._page_state.get() - 1) if self._page_state else self._lane_fallback
+
             if protocol.snapshot is not None:
                 lb = protocol.snapshot.lanes[lane]
-                current_name = _state_to_name(
-                    self._dynamic_function,
-                    lb.state, lb.dirty, lb.reverse, lb.undo_redo_state,
+                cur_state, cur_dirty  = lb.state, lb.dirty
+                cur_reverse, cur_undo = lb.reverse, lb.undo_redo_state
+                snap_seq              = protocol.snapshot.seq
+            elif self._default_state_name is not None:
+                # Pre-snapshot boot: use safe defaults and seq=-1 so the
+                # prediction is discarded the moment any real snapshot arrives.
+                cur_state, cur_dirty  = _STATE_STOPPED, False
+                cur_reverse, cur_undo = False, 0
+                snap_seq              = -1
+            else:
+                return  # no basis for a prediction
+
+            # If a previous press left a pending optimistic prediction for this
+            # lane (snapshot hasn't advanced yet), use it as the current state.
+            # This ensures a rapid second press (e.g. CLR immediately after
+            # recording completes) sees the post-first-press state, not the
+            # stale snapshot.
+            opt = self._optimistic_lane.get(lane)
+            if opt is not None:
+                opt_state, opt_dirty, opt_reverse, opt_undo, opt_seq = opt
+                if opt_seq == snap_seq:
+                    cur_state, cur_dirty  = opt_state, opt_dirty
+                    cur_reverse, cur_undo = opt_reverse, opt_undo
+
+            current_name = _state_to_name(
+                self._dynamic_function,
+                cur_state, cur_dirty, cur_reverse, cur_undo,
+            )
+            delta = _PRESS_DELTA.get((self._dynamic_function, current_name))
+            if delta is not None:
+                d_state, d_dirty, d_reverse, d_undo = delta
+                self._optimistic_lane.set(
+                    lane,
+                    d_state   if d_state   is not None else cur_state,
+                    d_dirty   if d_dirty   is not None else cur_dirty,
+                    d_reverse if d_reverse is not None else cur_reverse,
+                    d_undo    if d_undo    is not None else cur_undo,
+                    snap_seq,
                 )
-                predicted = _predict_state_name(self._dynamic_function, current_name)
-                if predicted is not None:
-                    self._optimistic = {
-                        "state_name": predicted,
-                        "seq":        protocol.snapshot.seq,
-                    }
 
     def release(self):
         if self._message_release:
@@ -416,7 +506,7 @@ class _LaneActionCallback(Callback):
     # ── Private: dynamic LED resolution ──────────────────────────────────────
 
     def _update_dynamic_led(self, protocol, lane):
-        """Resolve LED color from dynamic_leds.json × (function × state).
+        """Resolve LED color from leds.json × (function × state).
 
         Also caches the full state entry in self._current_led_entry so that
         _resolve_corner_label() can read the "label" key without a second lookup.
@@ -428,39 +518,42 @@ class _LaneActionCallback(Callback):
             if fn is not None:
                 self._dynamic_function = fn
 
-        # Optimistic state override (IG-3): use predicted state if snapshot has not
-        # advanced since the button was pressed. Clear the override once it has.
-        if self._optimistic is not None:
-            if protocol.snapshot is not None and protocol.snapshot.seq != self._optimistic["seq"]:
-                # New snapshot arrived — authoritative state takes over, clear override.
-                self._optimistic = None
+        # Step 2: resolve lane block — shared optimistic prediction takes precedence.
+        # All buttons on the same lane see the same prediction, giving consistent
+        # feedback across the whole surface the instant any button is pressed.
+        opt = self._optimistic_lane.get(lane) if self._optimistic_lane is not None else None
+        if opt is not None:
+            opt_state, opt_dirty, opt_reverse, opt_undo, opt_seq = opt
+            if protocol.snapshot is not None and protocol.snapshot.seq != opt_seq:
+                # A newer snapshot arrived — authoritative state wins.
+                self._optimistic_lane.clear(lane)
+                opt = None
 
-        # Step 2: map lane block to a state name (uses optimistic if active)
-        if protocol.snapshot is None:
-            state_name = "waiting"
-        elif self._optimistic is not None:
-            state_name = self._optimistic["state_name"]
+        if opt is not None:
+            state_name = _state_to_name(
+                self._dynamic_function,
+                opt_state, opt_dirty, opt_reverse, opt_undo,
+            ) if self._dynamic_function else "waiting"
+        elif protocol.snapshot is None:
+            state_name = self._default_state_name if self._default_state_name is not None else "waiting"
         elif self._dynamic_function:
             lb = protocol.snapshot.lanes[lane]
             state_name = _state_to_name(
                 self._dynamic_function,
-                lb.state,
-                lb.dirty,
-                lb.reverse,
-                lb.undo_redo_state,
+                lb.state, lb.dirty, lb.reverse, lb.undo_redo_state,
             )
         else:
-            # Function not yet known — use generic waiting state
             state_name = "waiting"
 
-        # Step 3: look up LED entry in dynamic_leds.json
+        # Step 3: look up LED entry in leds.json
         led_entry = None
         if self._dynamic_function and self._dynamic_leds:
-            fn_map = self._dynamic_leds.get(self._dynamic_function, {})
-            led_entry = fn_map.get(state_name)
-            # If the exact state is absent, fall through to fallback
+            fn_data = self._dynamic_leds.get(self._dynamic_function, {})
+            states_map = fn_data.get("states", {})
+            led_entry = states_map.get(state_name)
+            # If the exact state is absent, fall through to "waiting" fallback
             if led_entry is None and state_name not in ("waiting", "error"):
-                led_entry = fn_map.get("waiting")
+                led_entry = states_map.get("waiting")
 
         # Cache entry for label resolution (shared with _resolve_corner_label)
         self._current_led_entry = led_entry
@@ -483,15 +576,13 @@ class _LaneActionCallback(Callback):
     def _resolve_corner_label(self):
         """Four-tier label resolution.
 
-        Tier 3a: state-driven label from dynamic_leds.json state entry "label" key
-                 (e.g. REC_PLY in "empty" state → "REC"; in "playing" → "OVDB").
-                 null in the JSON means "no override — fall through to tier 3".
-        Tier 3:  static function display name from assignment store
-                 (e.g. CC20 matches REC_PLY → "REC/PLY")
-        Tier 2:  static label from JSON button.label field
-        Tier 1:  auto-fallback "CC{N}"
+        Tier 3a: state-driven label from leds.json state entry "label" key.
+                 null label in the JSON means no override -- fall through to tier 3.
+        Tier 3:  static function display name from assignment store.
+        Tier 2:  static label from JSON button.label field.
+        Tier 1:  auto-fallback "CC{N}".
         """
-        # Tier 3a (dynamic only): state-driven label from cached dynamic_leds entry
+        # Tier 3a (dynamic only): state-driven label from cached leds.json entry
         if self._dynamic and self._current_led_entry is not None:
             state_label = self._current_led_entry.get("label")
             if state_label is not None:

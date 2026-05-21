@@ -1,0 +1,74 @@
+{
+  "functions": {
+
+    "REC_PLY": {
+      "description": "Record / Play / Overdub toggle — the primary lane control button.",
+      "default": "empty",
+      "states": {
+        "recording":   { "color": "RED",        "brightness": 0.5,  "label": "PLAY" },
+        "overdubbing": { "color": "RED",        "brightness": 0.5,  "label": "PLAY" },
+        "playing":     { "color": "RED",        "brightness": 0.05, "label": "REC"  },
+        "stopped":     { "color": "RED",        "brightness": 0.05, "label": "REC"  },
+        "empty":       { "color": "RED",        "brightness": 0.05, "label": "REC"  },
+        "waiting":     { "color": "DARK_GRAY",  "brightness": 0.02, "label": null   },
+        "error":       { "color": "PURPLE",     "brightness": 0.3,  "label": null   }
+      }
+    },
+
+    "PLY_STP": {
+      "description": "Play / Stop toggle.",
+      "default": "empty",
+      "states": {
+        "recording":   { "color": "DARK_GREEN", "brightness": 0.05, "label": "PLAY" },
+        "overdubbing": { "color": "DARK_GREEN", "brightness": 0.05, "label": "PLAY" },
+        "playing":     { "color": "DARK_GREEN", "brightness": 0.5,  "label": "STOP" },
+        "stopped":     { "color": "DARK_GRAY",  "brightness": 0.05, "label": "PLAY" },
+        "empty":       { "color": "DARK_GRAY",  "brightness": 0.05, "label": null   },
+        "waiting":     { "color": "DARK_GRAY",  "brightness": 0.02, "label": null   },
+        "error":       { "color": "PURPLE",     "brightness": 0.3,  "label": null   }
+      }
+    },
+
+    "CLR": {
+      "description": "Clear lane. Lit when there is audio content to clear.",
+      "default": "empty",
+      "states": {
+        "has_audio":   { "color": "PURPLE",      "brightness": 0.5,  "label": "CLEAR" },
+        "empty":       { "color": "DARK_PURPLE", "brightness": 0.1,  "label": null    },
+        "waiting":     { "color": "DARK_GRAY",   "brightness": 0.02, "label": null    }
+      }
+    },
+
+    "MON": {
+      "description": "Monitor / speaker toggle.",
+      "default": "inactive",
+      "states": {
+        "active":      { "color": "BLUE",      "brightness": 0.5,  "label": "MON" },
+        "inactive":    { "color": "DARK_BLUE", "brightness": 0.1,  "label": "MON" },
+        "waiting":     { "color": "DARK_GRAY", "brightness": 0.02, "label": null  }
+      }
+    },
+
+    "UNDO_REDO": {
+      "description": "Undo / Redo toggle. State reflects what the next press will do.",
+      "default": "unavailable",
+      "states": {
+        "available":      { "color": "DARK_BLUE", "brightness": 0.3,  "label": "UNDO" },
+        "redo_available": { "color": "DARK_BLUE", "brightness": 0.5,  "label": "REDO" },
+        "unavailable":    { "color": "DARK_GRAY", "brightness": 0.05, "label": "UNDO" },
+        "waiting":        { "color": "DARK_GRAY", "brightness": 0.02, "label": null   }
+      }
+    },
+
+    "REV": {
+      "description": "Reverse toggle. Lit (orange) when the loop is currently playing in reverse.",
+      "default": "inactive",
+      "states": {
+        "active":   { "color": "ORANGE",    "brightness": 0.5,  "label": "FORWARD" },
+        "inactive": { "color": "ORANGE",    "brightness": 0.05, "label": "REVERSE" },
+        "waiting":  { "color": "DARK_GRAY", "brightness": 0.02, "label": null      }
+      }
+    }
+
+  }
+}

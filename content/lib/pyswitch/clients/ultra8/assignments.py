@@ -38,20 +38,19 @@ _FUNCTION_NAMES = {
     1: "PLY_STP",
     2: "CLR",
     3: "MON",
-    4: "UNDO",
+    4: "UNDO_REDO",
     5: "REV",
 }
 
 # ── Internal function name → display label ─────────────────────────────────
 # Human-readable text shown in button corner labels (tier-3 resolution).
 _DISPLAY_LABELS = {
-    "REC_PLY": "REC/PLY",
-    "PLY_STP": "PLY/STP",
-    "CLR":     "CLR",
-    "MON":     "MON",
-    "UNDO":    "UNDO",
-    "REDO":    "REDO",
-    "REV":     "REV",
+    "REC_PLY":   "REC/PLY",
+    "PLY_STP":   "PLY/STP",
+    "CLR":       "CLR",
+    "MON":       "MON",
+    "UNDO_REDO": "UNDO",
+    "REV":       "REV",
 }
 
 # Fallback shown before the first assignment message is received.

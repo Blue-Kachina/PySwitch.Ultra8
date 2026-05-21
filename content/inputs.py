@@ -30,8 +30,10 @@
 #
 # LED behavior:
 #   All four buttons are "dynamic: true" — their LED color and corner label
-#   are driven by dynamic_leds.json based on the Ultra8 function currently
-#   assigned to each button and the live lane state from SysEx snapshots.
+#   are driven by leds.json based on the Ultra8 function currently assigned
+#   to each button and the live lane state from SysEx snapshots.
+#   The "function" key in each lane JSON binds the LED function at init() time,
+#   so buttons show their default state immediately on boot.
 #
 # Press behaviour: messages fire on SHORT RELEASE.  When a button has both
 # `actions` and `actionsHold`, PySwitch delays firing `actions` until the
@@ -104,6 +106,12 @@ def _btn_brightness(button, fallback=0.3):
     return g.get("led_brightness", fallback)
 
 
+def _btn_function(button):
+    """Return the leds.json function name for a button, or None if absent."""
+    g = get_gesture(_config, button, "short")
+    return g.get("function", None)
+
+
 # ── Resolved CC numbers ───────────────────────────────────────────────────────
 # Default values match the pre-Phase-4 hardcoded assignments.
 
@@ -147,13 +155,12 @@ def _short_label(button, cc_number):
 Inputs = [
 
     # ── Switch 1 (back-left) ─────────────────────────────────────────────────
-    # Short: UNDO (CC22) — dynamic LED + tier-3 label from dynamic_leds.json.
-    # Long:  REDO (CC23) — fixed CUSTOM_MESSAGE; hold does not own LEDs.
-    # LED reflects undo_available from SysEx snapshot (bright vs dim yellow).
-    # Corner label resolves to "UNDO" once assignment message arrives; falls
-    # back to "UN/REDO" (tier-2 JSON label) until then.
-    # Note: REDO display (long-press state feedback) requires redo_available in
-    # the SysEx snapshot — deferred to protocol v0.2 / QoL Phase 2.
+    # Short: UNDO_REDO (CC22) — dynamic LED + state-driven label from leds.json.
+    # Long:  CLR (CC23) — dynamic ULTRA8_LANE_ACTION; fires optimistic lane clear.
+    # LED reflects undo_redo_state from SysEx snapshot (available / redo_available / unavailable).
+    # Corner label is state-driven: "UNDO" normally, "REDO" when redo stack is ready.
+    # Falls back to "UN/REDO" (tier-2 JSON label) before first snapshot arrives.
+    # Hold does not own LEDs or corner label.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_1,
         "actions": [
@@ -164,25 +171,30 @@ Inputs = [
                 color          = _btn_color("1", "YELLOW"),
                 led_brightness = _btn_brightness("1", 0.3),
                 dynamic        = True,
+                function       = _btn_function("1"),    # "UNDO_REDO" — binds LED at init()
                 drives_display = False,                 # center display owned by Switch A
                 lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_HEADER_1,
             ),
         ],
         "actionsHold": [
-            CUSTOM_MESSAGE(
+            ULTRA8_LANE_ACTION(
                 message        = _cc(_CC_1_LONG),
-                text           = "CC{}".format(_CC_1_LONG),   # hold: tier-1 until REDO in protocol
-                color          = Colors.YELLOW,
+                cc_number      = _CC_1_LONG,
+                color          = Colors.PURPLE,
                 led_brightness = 0.3,
-                display        = None,    # hold does not own the corner label
-                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION
+                dynamic        = True,
+                function       = "CLR",           # publishes optimistic clear on press
+                drives_display = False,
+                lane           = DEFAULT_PAGE - 1,
+                display        = None,    # hold does not own corner label
+                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION short action
             ),
         ],
     },
 
     # ── Switch 2 (back-right) ────────────────────────────────────────────────
-    # Short: REV (CC25) — dynamic LED + tier-3 label from dynamic_leds.json.
+    # Short: REV (CC25) — dynamic LED + tier-3 label from leds.json.
     # Long:  PAGE UP
     # LED reflects rev_active from SysEx snapshot (lit orange when loop is
     # reversed, dim when forward). Corner label resolves to "REV" once the
@@ -198,6 +210,7 @@ Inputs = [
                 color          = _btn_color("2", "ORANGE"),
                 led_brightness = _btn_brightness("2", 0.3),
                 dynamic        = True,
+                function       = _btn_function("2"),    # "REV" — binds LED at init()
                 drives_display = False,                 # center display owned by Switch A
                 lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_HEADER_2,
@@ -214,7 +227,8 @@ Inputs = [
 
     # ── Switch A (front-left) ────────────────────────────────────────────────
     # Short: REC/PLY (CC20) — dynamic LED + tier-3 label + center display.
-    # Long:  CLR (CC21) — fixed CUSTOM_MESSAGE; hold does not own LEDs.
+    # Long:  CC21 — unassigned in Ultra8; CUSTOM_MESSAGE placeholder.
+    # Hold does not own LEDs or corner label.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
         "actions": [
@@ -225,6 +239,7 @@ Inputs = [
                 color          = _btn_color("A", "DARK_GRAY"),
                 led_brightness = _btn_brightness("A", 0.3),
                 dynamic        = True,
+                function       = _btn_function("A"),    # "REC_PLY" — binds LED at init()
                 drives_display = True,                  # owns center DISPLAY_* labels
                 lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_FOOTER_1,
@@ -233,11 +248,11 @@ Inputs = [
         "actionsHold": [
             CUSTOM_MESSAGE(
                 message        = _cc(_CC_A_LONG),
-                text           = "CC{}".format(_CC_A_LONG),   # hold: always tier-1
-                color          = Colors.PURPLE,
+                text           = "CC{}".format(_CC_A_LONG),
+                color          = Colors.BLUE,
                 led_brightness = 0.3,
                 display        = None,    # hold does not own corner label
-                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION
+                use_leds       = False,   # LEDs belong to the short-press action
             ),
         ],
     },
@@ -256,6 +271,7 @@ Inputs = [
                 color          = _btn_color("B", "DARK_GRAY"),
                 led_brightness = _btn_brightness("B", 0.3),
                 dynamic        = True,
+                function       = _btn_function("B"),    # "PLY_STP" — binds LED at init()
                 drives_display = False,                 # center display owned by Switch A
                 display        = DISPLAY_FOOTER_2,
             ),

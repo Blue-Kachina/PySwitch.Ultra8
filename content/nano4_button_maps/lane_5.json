@@ -5,10 +5,7 @@
   },
   "buttons": {
     "A": {
-      "color": "DARK_GRAY",
-      "led_brightness": 0.3,
-      "dynamic": true,
-      "label": "REC/PLY",
+      "function": "REC_PLY",
       "short": {
         "type": "cc",
         "index": 20
@@ -19,10 +16,7 @@
       }
     },
     "B": {
-      "color": "DARK_GRAY",
-      "led_brightness": 0.3,
-      "dynamic": true,
-      "label": "PLY/STP",
+      "function": "PLY_STP",
       "short": {
         "type": "cc",
         "index": 24
@@ -33,10 +27,7 @@
       }
     },
     "1": {
-      "color": "YELLOW",
-      "led_brightness": 0.3,
-      "dynamic": true,
-      "label": "UN/REDO",
+      "function": "UNDO_REDO",
       "short": {
         "type": "cc",
         "index": 22
@@ -47,10 +38,7 @@
       }
     },
     "2": {
-      "color": "ORANGE",
-      "led_brightness": 0.3,
-      "dynamic": true,
-      "label": "REV",
+      "function": "REV",
       "short": {
         "type": "cc",
         "index": 25

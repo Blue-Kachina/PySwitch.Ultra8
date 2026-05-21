@@ -7,7 +7,7 @@
 #
 # File locations (relative to CIRCUITPY root):
 #   nano4_button_maps/lane_1.json  …  nano4_button_maps/lane_8.json
-#   nano4_button_maps/dynamic_leds.json
+#   nano4_button_maps/leds.json
 #   nano4_button_maps/default_lane.txt
 #
 # Public API:
@@ -31,9 +31,12 @@
 #                       label, color, led_brightness, dynamic
 #
 #   load_dynamic_leds() -> dict
-#       Read and parse dynamic_leds.json.  Returns nested dict:
-#           {function_name: {state_name: {"color": str, "brightness": float}}}
+#       Read and parse leds.json.  Returns nested dict:
+#           {function_name: {"default": str, "states": {state_name: {"color": str, "brightness": float, "label": str|None}}}}
 #       Cached after first load.  Returns {} on error; logs to serial.
+#
+#   get_led_default(dynamic_leds, function_name) -> str | None
+#       Return the "default" state name for a function, or None if absent.
 #
 #   resolve_color(name) -> color tuple
 #       Convert a color-name string (e.g. "RED") to a Colors tuple.
@@ -142,37 +145,46 @@ def load_lane_config(lane_number):
 # ── Dynamic LED loader ─────────────────────────────────────────────────────────
 
 def load_dynamic_leds():
-    """Load and parse dynamic_leds.json.
+    """Load and parse leds.json.
 
-    Returns a nested dict keyed by function name → state name →
-    {"color": str, "brightness": float}.  Uses a module-level cache so
-    the file is read at most once per boot.  Returns {} on error.
+    Returns a nested dict keyed by function name → {"default": str, "states": {...}}.
+    The "states" sub-dict maps state_name → {"color": str, "brightness": float, "label": str|None}.
+    Uses a module-level cache so the file is read at most once per boot.
+    Returns {} on error; logs to serial.
 
     Example result structure:
         {
             "REC_PLY": {
-                "recording":   {"color": "RED",        "brightness": 0.3},
-                "playing":     {"color": "LIGHT_GREEN", "brightness": 0.3},
-                ...
+                "default": "empty",
+                "states": {
+                    "recording": {"color": "RED",          "brightness": 0.5, "label": "PLAY"},
+                    "empty":     {"color": "RED",          "brightness": 0.05, "label": "REC"},
+                    ...
+                }
             },
             ...
         }
+
+    Callers look up state entries as:
+        dynamic_leds[function_name]["states"][state_name]
     """
     global _dynamic_leds_cache, _dynamic_leds_loaded
     if _dynamic_leds_loaded:
         return _dynamic_leds_cache if _dynamic_leds_cache is not None else {}
 
-    path = "{}/dynamic_leds.json".format(_BUTTON_MAP_PATH)
+    path = "{}/leds.json".format(_BUTTON_MAP_PATH)
     # Set flag first so repeated calls never retry a missing file
     _dynamic_leds_loaded = True
     try:
         with open(path) as fh:
             data = json.load(fh)
-            # Flatten: strip the "states" wrapper so callers look up as
-            #   dynamic_leds[function_name][state_name] → {color, brightness}
             raw = data.get("functions", {})
+            # Preserve the full per-function dict (includes "default" and "states")
             _dynamic_leds_cache = {
-                fn_name: fn_data.get("states", {})
+                fn_name: {
+                    "default": fn_data.get("default"),
+                    "states":  fn_data.get("states", {}),
+                }
                 for fn_name, fn_data in raw.items()
             }
     except OSError as exc:
@@ -183,6 +195,23 @@ def load_dynamic_leds():
         _dynamic_leds_cache = {}
 
     return _dynamic_leds_cache if _dynamic_leds_cache is not None else {}
+
+
+def get_led_default(dynamic_leds, function_name):
+    """Return the default state name for a function, or None if absent.
+
+    Args:
+        dynamic_leds:  the dict returned by load_dynamic_leds()
+        function_name: e.g. "REC_PLY"
+
+    Returns:
+        A string naming the boot state (e.g. "empty"), or None if the
+        function is missing or has no "default" key.
+    """
+    fn_data = dynamic_leds.get(function_name)
+    if fn_data is None:
+        return None
+    return fn_data.get("default")
 
 
 # ── Gesture resolver ───────────────────────────────────────────────────────────
@@ -196,14 +225,16 @@ def get_gesture(config, button, gesture):
         gesture-level channel > button-level channel > global.channel > None
 
     Returned keys:
-        type          — "cc", "note", "pc", or "internal"
-        index         — int (CC/note/PC number) or str ("next_lane", "prev_lane")
-        channel       — int or None (None = derive from page_state at press time)
-        value         — int (MIDI value to send; default 127)
-        label         — str or None (button-level label field)
-        color         — str  (color name; default "WHITE")
+        type           — "cc", "note", "pc", or "internal"
+        index          — int (CC/note/PC number) or str ("next_lane", "prev_lane")
+        channel        — int or None (None = derive from page_state at press time)
+        value          — int (MIDI value to send; default 127)
+        label          — str or None (button-level label field)
+        color          — str  (color name; default "WHITE")
         led_brightness — float (0.0–1.0; default 0.15)
-        dynamic        — bool (True = drive LED from dynamic_leds.json)
+        dynamic        — bool (True = drive LED from leds.json)
+        function       — str or None (leds.json function name for this button,
+                          e.g. "REC_PLY"; None for buttons without a function key)
 
     Returns {} if config is None or the button / gesture is not present.
     """
@@ -232,6 +263,7 @@ def get_gesture(config, button, gesture):
         "color":          button_cfg.get("color",  "WHITE"),
         "led_brightness": button_cfg.get("led_brightness", 0.15),
         "dynamic":        button_cfg.get("dynamic", False),
+        "function":       button_cfg.get("function", None),
     }
 
 
