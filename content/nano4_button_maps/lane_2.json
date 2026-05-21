@@ -17,7 +17,6 @@
     },
     "B": {
       "function": "PLY_STP",
-      "label": "PLY/STP",
       "short": {
         "type": "cc",
         "index": 24

@@ -53,19 +53,19 @@
       "description": "Undo / Redo toggle. State reflects what the next press will do.",
       "default": "unavailable",
       "states": {
-        "available":      { "color": "DARK_BLUE", "brightness": 0.3,  "label": "UNDO" },
-        "redo_available": { "color": "DARK_BLUE", "brightness": 0.5,  "label": "REDO" },
+        "available":      { "color": "DARK_GRAY", "brightness": 0.3,  "label": "UNDO" },
+        "redo_available": { "color": "WHITE",     "brightness": 0.5,  "label": "REDO" },
         "unavailable":    { "color": "DARK_GRAY", "brightness": 0.05, "label": "UNDO" },
         "waiting":        { "color": "DARK_GRAY", "brightness": 0.02, "label": null   }
       }
     },
 
     "REV": {
-      "description": "Reverse toggle. Lit (orange) when the loop is currently playing in reverse.",
+      "description": "Reverse toggle.",
       "default": "empty",
       "states": {
-        "active":   { "color": "ORANGE",    "brightness": 0.5,  "label": "FORWARD" },
-        "inactive": { "color": "ORANGE",    "brightness": 0.05, "label": "REVERSE" },
+        "active":   { "color": "WHITE",     "brightness": 0.5,  "label": "FORWARD" },
+        "inactive": { "color": "DARK_GRAY", "brightness": 0.05, "label": "REVERSE" },
         "empty":    { "color": "DARK_GRAY", "brightness": 0.05, "label": null      },
         "waiting":  { "color": "DARK_GRAY", "brightness": 0.02, "label": null      }
       }
