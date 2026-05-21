@@ -16,9 +16,6 @@
       }
     },
     "B": {
-      "color": "DARK_GRAY",
-      "led_brightness": 0.3,
-      "dynamic": true,
       "function": "PLY_STP",
       "label": "PLY/STP",
       "short": {

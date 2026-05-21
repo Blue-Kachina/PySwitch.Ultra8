@@ -19,11 +19,33 @@ reference.
 
 ### The `function` key
 
-Buttons with `"dynamic": true` may also carry a `"function"` string key naming
-the `leds.json` function they control (e.g. `"function": "REC_PLY"`). When
-present, the firmware binds the LED function at `init()` time without waiting
-for a SysEx assignment message. This eliminates the ~1-second boot delay before
-the first LED press feedback.
+Every button that drives a dynamic LED carries a `"function"` string at the
+button level, naming the `leds.json` function it controls
+(e.g. `"function": "REC_PLY"`). The firmware binds this function at `init()`
+time, so the button shows its default state color immediately on boot — there is
+no delay waiting for a SysEx assignment message.
+
+`color`, `led_brightness`, and `dynamic` keys do not appear on function buttons.
+All color and brightness information for function-bound buttons is defined
+exclusively in `leds.json` states. These three fields are only valid on
+non-function buttons (buttons with no `"function"` key) and are not used in the
+current deployed configuration.
+
+### The `default` state in `leds.json`
+
+Each function entry in `leds.json` has a `"default"` key naming the LED state
+the firmware should show at cold boot, before any SysEx snapshot has arrived
+from Ultra8. It must match one of the state names defined in that function's
+`"states"` dict.
+
+For example, `"REC_PLY"` defaults to `"empty"` (the lane contains no audio),
+and `"UNDO_REDO"` defaults to `"unavailable"` (nothing to undo). This means
+all four buttons light up in their correct idle colors the moment the NANO4
+boots, with no waiting for Ultra8 to respond.
+
+When Ultra8 starts sending snapshots, `reconcile_snapshot()` runs on each
+accepted snapshot and corrects any button whose predicted state diverges from
+the authoritative Ultra8 state, typically within one heartbeat period (~1 s).
 
 ## leds.json
 
