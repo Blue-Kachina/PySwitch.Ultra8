@@ -244,6 +244,17 @@ class Ultra8Protocol:
                 chan_selected if chan_selected != 0x7F else "none",
             ))
 
+        # Push authoritative state to all registered lane action callbacks.
+        # Lazy import avoids circular dependency; page_state gives the active lane.
+        try:
+            from .actions.lane_action import reconcile_snapshot
+            from . import page_state
+            lane_index = page_state.get() - 1
+            reconcile_snapshot(self.snapshot, lane_index)
+        except Exception as exc:
+            if self.debug:
+                print("U8 proto [snap]: reconcile error:", exc)
+
         return True
 
     # ── Private: assignment message parser ────────────────────────────────

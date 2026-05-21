@@ -27,8 +27,8 @@
 #   get_gesture(config, button, gesture) -> dict
 #       Resolve the full action dict for (button, gesture) by merging
 #       global-level defaults.  Returns {} if absent.
-#       Keys in result: type, index, channel, value,
-#                       label, color, led_brightness, dynamic
+#       Keys always present: type, index, channel, value, label, function
+#       Keys only for non-function buttons: color, led_brightness, dynamic
 #
 #   load_dynamic_leds() -> dict
 #       Read and parse leds.json.  Returns nested dict:
@@ -224,17 +224,18 @@ def get_gesture(config, button, gesture):
     Channel precedence:
         gesture-level channel > button-level channel > global.channel > None
 
-    Returned keys:
-        type           — "cc", "note", "pc", or "internal"
-        index          — int (CC/note/PC number) or str ("next_lane", "prev_lane")
-        channel        — int or None (None = derive from page_state at press time)
-        value          — int (MIDI value to send; default 127)
-        label          — str or None (button-level label field)
+    Returned keys (always present):
+        type     — "cc", "note", "pc", or "internal"
+        index    — int (CC/note/PC number) or str ("next_lane", "prev_lane")
+        channel  — int or None (None = derive from page_state at press time)
+        value    — int (MIDI value to send; default 127)
+        label    — str or None (button-level label field)
+        function — str or None (leds.json function name; e.g. "REC_PLY")
+
+    Returned keys (only when `function` is None — legacy non-function buttons):
         color          — str  (color name; default "WHITE")
         led_brightness — float (0.0–1.0; default 0.15)
         dynamic        — bool (True = drive LED from leds.json)
-        function       — str or None (leds.json function name for this button,
-                          e.g. "REC_PLY"; None for buttons without a function key)
 
     Returns {} if config is None or the button / gesture is not present.
     """
@@ -254,17 +255,25 @@ def get_gesture(config, button, gesture):
         button_cfg.get("channel", global_cfg.get("channel", None))
     )
 
-    return {
-        "type":           gesture_cfg.get("type",  "cc"),
-        "index":          gesture_cfg.get("index", None),
-        "channel":        channel,
-        "value":          gesture_cfg.get("value", global_cfg.get("value", 127)),
-        "label":          button_cfg.get("label",  None),
-        "color":          button_cfg.get("color",  "WHITE"),
-        "led_brightness": button_cfg.get("led_brightness", 0.15),
-        "dynamic":        button_cfg.get("dynamic", False),
-        "function":       button_cfg.get("function", None),
+    function = button_cfg.get("function", None)
+
+    result = {
+        "type":    gesture_cfg.get("type",  "cc"),
+        "index":   gesture_cfg.get("index", None),
+        "channel": channel,
+        "value":   gesture_cfg.get("value", global_cfg.get("value", 127)),
+        "label":   button_cfg.get("label",  None),
+        "function": function,
     }
+
+    # color / led_brightness / dynamic are only meaningful for non-function buttons.
+    # Function buttons derive color and brightness exclusively from leds.json states.
+    if function is None:
+        result["color"]          = button_cfg.get("color",  "WHITE")
+        result["led_brightness"] = button_cfg.get("led_brightness", 0.15)
+        result["dynamic"]        = button_cfg.get("dynamic", False)
+
+    return result
 
 
 # ── Color helper ───────────────────────────────────────────────────────────────
