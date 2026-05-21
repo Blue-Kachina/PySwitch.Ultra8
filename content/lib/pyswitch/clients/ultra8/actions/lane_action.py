@@ -117,6 +117,8 @@ def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
     elif function_name == "CLR":
         return "has_audio" if dirty else "empty"
     elif function_name == "REV":
+        if state == _STATE_STOPPED and not dirty:
+            return "empty"
         return "active" if reverse else "inactive"
     elif function_name == "UNDO_REDO":
         if undo_redo_state == 1:
@@ -160,8 +162,11 @@ _PRESS_DELTA = {
     ("CLR", "has_audio"):       (_STATE_STOPPED, False, False, 0),
 
     # ── REV ──────────────────────────────────────────────────────────────────
-    ("REV", "inactive"):        (None, None, True,  None),
-    ("REV", "active"):          (None, None, False, None),
+    # dirty=True: pressing REV from "inactive"/"active" implies audio is present.
+    # Without it, the None→False sentinel would satisfy the "empty" check in
+    # _state_to_name() and predict the wrong state.
+    ("REV", "inactive"):        (None, True, True,  None),
+    ("REV", "active"):          (None, True, False, None),
 
     # ── UNDO_REDO ─────────────────────────────────────────────────────────────
     # After undo, redo becomes available; after redo, undo is available again.
@@ -182,11 +187,64 @@ _PRESS_DELTA = {
 # Cascades apply _apply_state() only — they do NOT re-broadcast, preventing loops.
 
 _CASCADE = {
+
+    # ── CLR: all audio cleared ───────────────────────────────────────────────
     ("CLR", "empty"): [
         ("REC_PLY",   "empty"),
         ("PLY_STP",   "empty"),
         ("UNDO_REDO", "unavailable"),
+        ("REV",       "empty"),
     ],
+
+    # ── REC_PLY: first-pass recording begun (no audio committed yet) ─────────
+    ("REC_PLY", "recording"): [
+        ("PLY_STP",   "recording"),
+        # CLR/REV stay "empty" — dirty=False until recording completes
+    ],
+
+    # ── REC_PLY: playback started (audio committed, dirty=True) ─────────────
+    ("REC_PLY", "playing"): [
+        ("PLY_STP",   "playing"),
+        ("CLR",       "has_audio"),
+        ("UNDO_REDO", "available"),
+        ("REV",       "inactive"),  # audio present; optimistically assume forward
+    ],
+
+    # ── REC_PLY: overdubbing ─────────────────────────────────────────────────
+    ("REC_PLY", "overdubbing"): [
+        ("PLY_STP",   "overdubbing"),
+        ("CLR",       "has_audio"),
+        ("UNDO_REDO", "available"),
+        # REV left unchanged — reverse state unknown at this point
+    ],
+
+    # ── REC_PLY: stopped with audio ──────────────────────────────────────────
+    ("REC_PLY", "stopped"): [
+        ("PLY_STP",   "stopped"),
+        ("CLR",       "has_audio"),
+        # REV left unchanged
+    ],
+
+    # ── REC_PLY: empty (e.g. after undo back to nothing) ────────────────────
+    ("REC_PLY", "empty"): [
+        ("PLY_STP",   "empty"),
+        ("CLR",       "empty"),
+        ("UNDO_REDO", "unavailable"),
+        ("REV",       "empty"),
+    ],
+
+    # ── PLY_STP: playback started ────────────────────────────────────────────
+    ("PLY_STP", "playing"): [
+        ("REC_PLY",   "playing"),
+        ("CLR",       "has_audio"),
+    ],
+
+    # ── PLY_STP: stopped ─────────────────────────────────────────────────────
+    ("PLY_STP", "stopped"): [
+        ("REC_PLY",   "stopped"),
+        ("CLR",       "has_audio"),
+    ],
+
 }
 
 

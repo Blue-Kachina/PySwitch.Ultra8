@@ -62,10 +62,11 @@
 
     "REV": {
       "description": "Reverse toggle. Lit (orange) when the loop is currently playing in reverse.",
-      "default": "inactive",
+      "default": "empty",
       "states": {
         "active":   { "color": "ORANGE",    "brightness": 0.5,  "label": "FORWARD" },
         "inactive": { "color": "ORANGE",    "brightness": 0.05, "label": "REVERSE" },
+        "empty":    { "color": "DARK_GRAY", "brightness": 0.05, "label": null      },
         "waiting":  { "color": "DARK_GRAY", "brightness": 0.02, "label": null      }
       }
     }
