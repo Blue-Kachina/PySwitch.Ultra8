@@ -20,7 +20,7 @@
 #
 # If the JSON file is unavailable, the fallback CC numbers below apply:
 #   Switch A  short  → CC 20  (REC/PLY)
-#   Switch A  long   → CC 21  (CLR)
+#   Switch A  long   → CC 26  (TUNER on/off)
 #   Switch 1  short  → CC 22  (UNDO/REDO)
 #   Switch 1  long   → CC 23  (CLR)
 #   Switch 2  short  → CC 25  (REV)
@@ -42,8 +42,8 @@
 ##############################################################################
 
 from pyswitch.hardware.devices.pa_midicaptain_nano_4 import *
-from pyswitch.clients.local.actions.custom import CUSTOM_MESSAGE
 from pyswitch.clients.ultra8.actions.lane_action import ULTRA8_LANE_ACTION
+from pyswitch.clients.ultra8.actions.tuner_action import ULTRA8_TUNER_ACTION
 from pyswitch.clients.ultra8.actions.page_nav import ULTRA8_PAGE_NAV
 from pyswitch.clients.ultra8 import page_state as _page_state
 from pyswitch.colors import Colors
@@ -103,7 +103,7 @@ def _btn_function(button):
 # Default values match the pre-Phase-4 hardcoded assignments.
 
 _CC_A_SHORT = _cc_index("A", "short", 20)   # REC/PLY
-_CC_A_LONG  = _cc_index("A", "long",  21)   # CLR
+# _CC_A_LONG removed: Button A long press is now ULTRA8_TUNER_ACTION (CC26), not a raw CC
 _CC_1_SHORT = _cc_index("1", "short", 22)   # UNDO/REDO
 _CC_1_LONG  = _cc_index("1", "long",  23)   # CLR
 _CC_2_SHORT = _cc_index("2", "short", 25)   # REV
@@ -189,7 +189,8 @@ Inputs = [
 
     # ── Switch A (front-left) ────────────────────────────────────────────────
     # Short: REC/PLY (CC20) — function-bound LED + tier-3 label + center display.
-    # Long:  CC21 — unassigned in Ultra8; CUSTOM_MESSAGE placeholder.
+    # Long:  TUNER (CC26) — chromatic tuner overlay; exits on second long-press
+    #        or after 30 s without tuner SysEx.
     # Hold does not own LEDs or corner label.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
@@ -205,11 +206,8 @@ Inputs = [
             ),
         ],
         "actionsHold": [
-            CUSTOM_MESSAGE(
-                message        = _cc(_CC_A_LONG),
-                text           = "CC{}".format(_CC_A_LONG),
-                color          = Colors.BLUE,
-                led_brightness = 0.3,
+            ULTRA8_TUNER_ACTION(
+                lane           = DEFAULT_PAGE - 1,
                 display        = None,    # hold does not own corner label
                 use_leds       = False,   # LEDs belong to the short-press action
             ),

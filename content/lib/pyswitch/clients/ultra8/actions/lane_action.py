@@ -522,6 +522,22 @@ class _LaneActionCallback(Callback):
     # ── Button press / release ────────────────────────────────────────────────
 
     def push(self):
+        # ── Tuner intercept ───────────────────────────────────────────────────
+        # If the tuner overlay is active, any lane button press is re-routed to
+        # exit tuner mode (send CC26=0) instead of the normal lane CC.  This
+        # keeps all four footswitches functional as "exit tuner" during tuning.
+        try:
+            from pyswitch.clients.ultra8 import tuner_state, page_state
+            if tuner_state.is_active():
+                lane_zero = page_state.get() - 1
+                channel_byte = 0xB0 + (lane_zero & 0x0F)
+                self._appl.client.midi.send(self._RawMessage([channel_byte, 26, 0]))
+                tuner_state.exit_to_normal()
+                return
+        except ImportError:
+            pass
+        # ─────────────────────────────────────────────────────────────────────
+
         msg = self._message() if callable(self._message) else self._message
         self._appl.client.midi.send(self._RawMessage(msg))
 
@@ -609,6 +625,14 @@ class _LaneActionCallback(Callback):
 
     def _update_center_display(self, protocol, lane):
         """Drive DISPLAY_LANE / STATE / PROGRESS / SEQ from current snapshot."""
+        # Yield to tuner overlay when active — tuner_action owns the center display then
+        try:
+            from pyswitch.clients.ultra8 import tuner_state
+            if tuner_state.is_active():
+                return
+        except ImportError:
+            pass
+
         if self._lane_label:
             self._lane_label.text = "Lane " + str(lane + 1)
 

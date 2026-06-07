@@ -4,12 +4,15 @@
 #
 # Unit 3.6: Full v0.1 SysEx state snapshot parser
 # Unit 6.4: Extended to handle v0.1 assignment messages (msg_type 0x02)
+# Tuner Ph1: Extended to handle v0.1 tuner messages (msg_type 0x04)
 #
 #   Routes incoming SysEx by msg_type byte (data[1]):
 #     0x01 — state snapshot  → _receive_snapshot(); updates self.snapshot
 #     0x02 — assignment msg  → _receive_assign();   updates assignments.py
+#     0x03 — timing metadata → _receive_timing();   updates self.lane_periods
+#     0x04 — tuner update    → _receive_tuner();    updates tuner_state
 #
-#   Both message types share manufacturer_id (0x7D) and protocol_id (0x55).
+#   All message types share manufacturer_id (0x7D) and protocol_id (0x55).
 #   An unknown msg_type is recognised as ours but silently ignored so old
 #   firmware gracefully discards future message types.
 #
@@ -21,7 +24,7 @@
 #   5. (data[6 + N*3] & 0x07) == N  for N in 0–7 (lane_info bits 2:0 sanity)
 #   6. seq != last accepted snapshot seq   (duplicate suppression)
 #
-# Assignment message validation rules (docs/protocol_assignment_metadata_v0_1.md):
+# Assignment message validation rules:
 #   1. manufacturer_id  == bytes([0x7D])
 #   2. data[0]          == 0x55            (protocol ID)
 #   3. data[1]          == 0x02            (msg_type: assignment)
@@ -29,6 +32,15 @@
 #   5. seq != last accepted assignment seq (duplicate suppression)
 #   6. data[4]          == 6               (num_controls; must be 6)
 #   Any failure → silently discard; last accepted state is retained.
+#
+# Tuner message validation rules (tuner_implementation.md §SysEx):
+#   1. manufacturer_id  == bytes([0x7D])
+#   2. data[0]          == 0x55            (protocol ID)
+#   3. data[1]          == 0x04            (msg_type: tuner update)
+#   4. len(data)        == 13              (total packet 16 bytes)
+#   5. data[6]          in 1..8            (lane, 1-indexed)
+#   6. packet is for this device's lane (data[6] == page_state.get())
+#   Any failure → silently discard.
 #
 ##############################################################################
 
@@ -42,11 +54,13 @@ _PROTOCOL_ID        = 0x55            # Ultra8 NANO4 protocol identifier
 _MSG_TYPE_SNAPSHOT  = 0x01            # State snapshot (Unit 3.6)
 _MSG_TYPE_ASSIGN    = 0x02            # Assignment message (Unit 6.4)
 _MSG_TYPE_TIMING    = 0x03            # Timing metadata (Unit A.3)
+_MSG_TYPE_TUNER     = 0x04            # Tuner update (Tuner Ph1)
 
 # Expected data lengths (= total packet bytes − 3 framing bytes: F0 mfr F7)
 _SNAPSHOT_DATA_LEN  = 30              # 33-byte packet
 _ASSIGN_DATA_LEN    = 23              # 26-byte packet (6 controls)
 _TIMING_DATA_LEN    = 21              # 24-byte packet (8 lanes × 2 bytes)
+_TUNER_DATA_LEN     = 13              # 16-byte packet
 
 _NUM_LANES          = 8
 
@@ -135,6 +149,7 @@ class Ultra8Protocol:
         self._last_seq         = None        # seq of last accepted state snapshot
         self._last_assign_seq  = None        # seq of last accepted assignment message
         self._last_timing_seq  = None        # seq of last accepted timing message
+        self._last_tuner_seq   = None        # seq of last accepted tuner message
         self.lane_periods      = [0] * 8     # loop period in ms per lane; 0 = unknown
 
     # ── BidirectionalClient interface ──────────────────────────────────────
@@ -178,6 +193,9 @@ class Ultra8Protocol:
 
         if msg_type == _MSG_TYPE_TIMING:
             return self._receive_timing(data)
+
+        if msg_type == _MSG_TYPE_TUNER:
+            return self._receive_tuner(data)
 
         # Unknown msg_type: recognised as ours (don't pass to other handlers)
         # but silently ignored (forward-compatibility with future message types).
@@ -355,5 +373,99 @@ class Ultra8Protocol:
             print("U8 proto [timing]: accepted seq={} periods={}".format(
                 seq, self.lane_periods
             ))
+
+        return True
+
+    # ── Private: tuner message parser ─────────────────────────────────────
+
+    def _receive_tuner(self, data):
+        """Parse a v0.1 tuner update message (msg_type 0x04) and deliver it
+        to tuner_state if the packet is addressed to this device's lane.
+
+        Packet layout (data indices after stripping F0 + manufacturer_id):
+          data[0]  = 0x55                    (protocol ID, already validated)
+          data[1]  = 0x04                    (msg_type, already validated)
+          data[2]  = seq_lo
+          data[3]  = seq_hi
+          data[4]  = lane    (1-indexed, 1–8)
+          data[5]  = active  (1 = tuner active, 0 = exit)
+          data[6]  = note    (0=C … 11=B)
+          data[7]  = octave_byte  (actual_octave + 2; E1 → 3)
+          data[8]  = cents_mag    (0–50)
+          data[9]  = cents_sign   (0=flat, 1=sharp)
+          data[10] = confidence   (0–127)
+          data[11] = signal_level (0–127)
+          data[12] = stable       (0 or 1)
+        """
+
+        # ── Length check ──────────────────────────────────────────────────
+        if len(data) != _TUNER_DATA_LEN:
+            if self.debug:
+                print("U8 proto [tuner]: bad length", len(data),
+                      "(expected", _TUNER_DATA_LEN, ")")
+            return False
+
+        # ── Sequence number ───────────────────────────────────────────────
+        seq = data[2] | (data[3] << 7)
+
+        # ── Duplicate suppression ─────────────────────────────────────────
+        if seq == self._last_tuner_seq:
+            if self.debug:
+                print("U8 proto [tuner]: duplicate seq", seq, "— discarded")
+            return True
+
+        # ── Lane filter: only process packets for this device's lane ──────
+        packet_lane = data[4]   # 1-indexed
+        if packet_lane < 1 or packet_lane > 8:
+            if self.debug:
+                print("U8 proto [tuner]: invalid lane byte", packet_lane)
+            return False
+
+        try:
+            from . import page_state
+            device_lane = page_state.get()   # 1-indexed
+        except Exception:
+            device_lane = None
+
+        if device_lane is not None and packet_lane != device_lane:
+            # Packet is for a different device — ignore silently (not an error)
+            return True
+
+        # ── Extract tuner data ────────────────────────────────────────────
+        active       = data[5]
+        note         = data[6]
+        octave       = data[7] - 2        # decode: actual_octave = byte - 2
+        cents_mag    = data[8]
+        cents_sign   = data[9]            # 0 = flat, 1 = sharp
+        confidence   = data[10]
+        signal_level = data[11]
+        stable       = data[12]
+
+        # ── Accept ────────────────────────────────────────────────────────
+        self._last_tuner_seq = seq
+
+        if self.debug:
+            sign_str = "sharp" if cents_sign else "flat"
+            print("U8 proto [tuner]: seq={} lane={} active={} note={} oct={} "
+                  "cents={}{} conf={} sig={} stable={}".format(
+                      seq, packet_lane, active, note, octave,
+                      cents_mag, sign_str, confidence, signal_level, stable))
+
+        # ── Deliver to tuner_state ────────────────────────────────────────
+        try:
+            from . import tuner_state
+            tuner_state.receive_update(
+                active       = active,
+                note         = note,
+                octave       = octave,
+                cents_mag    = cents_mag,
+                cents_sign   = cents_sign,
+                confidence   = confidence,
+                signal_level = signal_level,
+                stable       = stable,
+            )
+        except Exception as exc:
+            if self.debug:
+                print("U8 proto [tuner]: tuner_state error:", exc)
 
         return True
