@@ -41,10 +41,12 @@ _MANUFACTURER_ID    = bytes([0x7D])   # MIDI non-commercial / educational
 _PROTOCOL_ID        = 0x55            # Ultra8 NANO4 protocol identifier
 _MSG_TYPE_SNAPSHOT  = 0x01            # State snapshot (Unit 3.6)
 _MSG_TYPE_ASSIGN    = 0x02            # Assignment message (Unit 6.4)
+_MSG_TYPE_TIMING    = 0x03            # Timing metadata (Unit A.3)
 
 # Expected data lengths (= total packet bytes − 3 framing bytes: F0 mfr F7)
 _SNAPSHOT_DATA_LEN  = 30              # 33-byte packet
 _ASSIGN_DATA_LEN    = 23              # 26-byte packet (6 controls)
+_TIMING_DATA_LEN    = 21              # 24-byte packet (8 lanes × 2 bytes)
 
 _NUM_LANES          = 8
 
@@ -132,6 +134,8 @@ class Ultra8Protocol:
         self.last_feedback_ms  = None        # ms timestamp of last accepted snapshot
         self._last_seq         = None        # seq of last accepted state snapshot
         self._last_assign_seq  = None        # seq of last accepted assignment message
+        self._last_timing_seq  = None        # seq of last accepted timing message
+        self.lane_periods      = [0] * 8     # loop period in ms per lane; 0 = unknown
 
     # ── BidirectionalClient interface ──────────────────────────────────────
 
@@ -171,6 +175,9 @@ class Ultra8Protocol:
 
         if msg_type == _MSG_TYPE_ASSIGN:
             return self._receive_assign(data)
+
+        if msg_type == _MSG_TYPE_TIMING:
+            return self._receive_timing(data)
 
         # Unknown msg_type: recognised as ours (don't pass to other handlers)
         # but silently ignored (forward-compatibility with future message types).
@@ -302,6 +309,51 @@ class Ultra8Protocol:
         if self.debug:
             print("U8 proto [assign]: accepted seq={} controls={}".format(
                 seq, num_controls
+            ))
+
+        return True
+
+    # ── Private: timing metadata parser ──────────────────────────────────
+
+    def _receive_timing(self, data):
+        """Parse a v0.1 timing metadata message (msg_type 0x03) and update
+        self.lane_periods[0..7] with loop period in milliseconds per lane.
+        Packet layout: docs/protocol_timing_v0_1.md
+        """
+
+        # ── Length check ──────────────────────────────────────────────────
+        if len(data) != _TIMING_DATA_LEN:
+            if self.debug:
+                print("U8 proto [timing]: bad length", len(data),
+                      "(expected", _TIMING_DATA_LEN, ")")
+            return False
+
+        # ── Sequence number ───────────────────────────────────────────────
+        seq = data[2] | (data[3] << 7)
+
+        # ── Duplicate suppression ─────────────────────────────────────────
+        if seq == self._last_timing_seq:
+            if self.debug:
+                print("U8 proto [timing]: duplicate seq", seq, "— discarded")
+            return True
+
+        # ── num_lanes validation ──────────────────────────────────────────
+        if data[4] != 8:
+            if self.debug:
+                print("U8 proto [timing]: unexpected num_lanes", data[4])
+            return False
+
+        # ── Parse period blocks ───────────────────────────────────────────
+        for i in range(8):
+            base = 5 + i * 2
+            self.lane_periods[i] = data[base] | (data[base + 1] << 7)
+
+        # ── Accept ────────────────────────────────────────────────────────
+        self._last_timing_seq = seq
+
+        if self.debug:
+            print("U8 proto [timing]: accepted seq={} periods={}".format(
+                seq, self.lane_periods
             ))
 
         return True

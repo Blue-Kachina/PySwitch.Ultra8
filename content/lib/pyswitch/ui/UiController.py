@@ -37,6 +37,10 @@ class UiController(Updater, Updateable):
     def update(self):
         Updater.update(self)
 
+    # Trigger one display refresh cycle (needed when auto_refresh=False)
+    def refresh(self):
+        self.__display_driver.tft.refresh()
+
     # Shows the current splash
     def show(self):
         # Get DisplayElement from callback

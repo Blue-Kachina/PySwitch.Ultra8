@@ -39,12 +39,37 @@
 #
 ##############################################################################
 
+import displayio
 from micropython import const
 from pyswitch.colors import Colors, DEFAULT_LABEL_COLOR
 from pyswitch.ui.ui import DisplayElement, DisplayBounds
 from pyswitch.ui.elements import DisplayLabel
 from pyswitch.clients.local.callbacks.splashes import SplashesCallback
 from pyswitch.clients.ultra8.lane_config import load_default_lane as _load_default_lane
+
+
+class _TileGridElement(DisplayElement):
+    """Thin DisplayElement wrapper for a raw displayio.TileGrid.
+
+    The PySwitch framework calls child.initialized() and child.init(ui, appl)
+    on every entry in the Splashes children list.  Raw TileGrid objects do not
+    have these methods, so they must be wrapped.  This class appends the
+    TileGrid to ui.splash (the displayio Group) during init(), which is exactly
+    what DisplayLabel does with its own backing Group.
+    """
+
+    def __init__(self, tile_grid):
+        super().__init__()
+        self._tile_grid = tile_grid
+
+    def init(self, ui, appl):
+        # Wrap TileGrid in a Group, matching how DisplayLabel adds its content.
+        # Adding a TileGrid directly to the root splash Group prevents runtime
+        # bitmap/palette updates from propagating to the display.
+        wrapper = displayio.Group()
+        wrapper.append(self._tile_grid)
+        ui.splash.append(wrapper)
+        super().init(ui, appl)
 DEFAULT_PAGE = _load_default_lane()   # initial lane for DISPLAY_LANE text
 
 # ── Dimensions ───────────────────────────────────────────────────────────────
@@ -98,16 +123,36 @@ DISPLAY_STATE = DisplayLabel(
     },
 )
 
-# Loop progress bar — ASCII block characters.
-# Updated by lane_action.py when PLAYING or OVERDUBBING; empty otherwise.
-DISPLAY_PROGRESS = DisplayLabel(
-    bounds = DisplayBounds(0, 143, _W, 30),
-    layout = {
-        "font":      "/fonts/H20.pcf",
-        "text":      "",
-        "textColor": Colors.DARK_GRAY,
-    },
+# ── Waveform canvas (Unit B.1b) ───────────────────────────────────────────────
+#
+# Replaces the old ASCII DISPLAY_PROGRESS label.
+# A raw displayio.Bitmap at y=143 (30px tall, full 240px wide) drawn by
+# waveform.py each animation frame via WAVEFORM_BITMAP pixel writes.
+#
+# Palette indices:
+#   0 — background (black)
+#   1 — PLAYING color  (green)
+#   2 — OVERDUBBING color (red/amber)
+#   3 — reserved / dim (dark gray, future use)
+#
+_WAVE_W = const(240)
+_WAVE_H = const(30)
+_WAVE_Y = const(143)    # matches old DISPLAY_PROGRESS y
+
+WAVEFORM_PALETTE    = displayio.Palette(4)
+WAVEFORM_PALETTE[0] = 0x000000   # background
+WAVEFORM_PALETTE[1] = 0x00BB44   # playing  (green)
+WAVEFORM_PALETTE[2] = 0xCC3300   # overdubbing (red)
+WAVEFORM_PALETTE[3] = 0x333333   # dim / reserved
+
+WAVEFORM_BITMAP    = displayio.Bitmap(_WAVE_W, _WAVE_H, 4)
+WAVEFORM_TILE      = displayio.TileGrid(
+    WAVEFORM_BITMAP,
+    pixel_shader = WAVEFORM_PALETTE,
+    x = 0,
+    y = _WAVE_Y,
 )
+WAVEFORM_ELEMENT   = _TileGridElement(WAVEFORM_TILE)
 
 # Snapshot sequence counter — tiny, dark gray.
 # Updated by lane_action.py to "#N" on each accepted snapshot; empty when stale.
@@ -151,8 +196,8 @@ Splashes = SplashesCallback(
             # Primary state — updated live by lane_action.py
             DISPLAY_STATE,
 
-            # Loop progress bar — updated live by lane_action.py
-            DISPLAY_PROGRESS,
+            # Waveform canvas — drawn live by lane_action.py via waveform.py
+            WAVEFORM_ELEMENT,
 
             # Snapshot sequence counter — updated live by lane_action.py
             DISPLAY_SEQ,

@@ -71,6 +71,7 @@
 from ....controller.callbacks import Callback
 from ....controller.actions import Action
 from ....colors import Colors
+from ....misc import get_current_millis
 from adafruit_midi.midi_message import MIDIMessage
 
 
@@ -87,7 +88,7 @@ _BAR_WIDTH = 14
 def _make_bar(loop_phase):
     """14-char block progress bar from loop_phase (0–127)."""
     filled = max(0, min(_BAR_WIDTH, int(loop_phase / 127 * _BAR_WIDTH)))
-    return "█" * filled + "░" * (_BAR_WIDTH - filled)
+    return "#" * filled + "-" * (_BAR_WIDTH - filled)
 
 
 def _state_to_name(function_name, state, dirty, reverse, undo_redo_state=0):
@@ -388,10 +389,13 @@ class _LaneActionCallback(Callback):
         self._assignments  = None
         self._dynamic_leds = None               # nested dict from leds.json
 
+        # ── Dead-reckoning state (Unit A.4) ──────────────────────────────────────
+        self._dr_phase = 0                  # loop_phase from last accepted snapshot
+        self._dr_ts    = 0                  # get_current_millis() at that snapshot
+
         # ── Center-display label refs (set in init()) ─────────────────────────
         self._lane_label     = None             # DISPLAY_LANE:     "Lane N"
         self._state_label    = None             # DISPLAY_STATE:    big state text
-        self._progress_label = None             # DISPLAY_PROGRESS: progress bar
         self._seq_label      = None             # DISPLAY_SEQ:      seq counter
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -402,11 +406,10 @@ class _LaneActionCallback(Callback):
 
         # Late-import center-display labels (display.py loads after communication.py)
         try:
-            from display import DISPLAY_LANE, DISPLAY_STATE, DISPLAY_PROGRESS, DISPLAY_SEQ
-            self._lane_label     = DISPLAY_LANE
-            self._state_label    = DISPLAY_STATE
-            self._progress_label = DISPLAY_PROGRESS
-            self._seq_label      = DISPLAY_SEQ
+            from display import DISPLAY_LANE, DISPLAY_STATE, DISPLAY_SEQ
+            self._lane_label    = DISPLAY_LANE
+            self._state_label   = DISPLAY_STATE
+            self._seq_label     = DISPLAY_SEQ
         except (ImportError, AttributeError):
             pass   # running without display (tests, emulator)
 
@@ -586,6 +589,22 @@ class _LaneActionCallback(Callback):
             self.action.label.text       = self._resolve_corner_label()
             self.action.label.back_color = self._current_color
 
+    # ── Private: dead-reckoning ───────────────────────────────────────────────
+
+    def _get_phase(self, protocol, lane):
+        """Return extrapolated loop_phase (0–127) using dead-reckoning.
+
+        If a loop period is known from the timing metadata message, advance
+        _dr_phase by the time elapsed since the last snapshot anchor.
+        Falls back to the raw snapshot phase when period is unknown (0).
+        Only extrapolates in PLAYING or OVERDUBBING states.
+        """
+        period_ms = protocol.lane_periods[lane] if hasattr(protocol, 'lane_periods') else 0
+        if period_ms <= 0:
+            return self._dr_phase
+        elapsed = get_current_millis() - self._dr_ts
+        return int(self._dr_phase + elapsed / period_ms * 127) % 128
+
     # ── Private: center display ───────────────────────────────────────────────
 
     def _update_center_display(self, protocol, lane):
@@ -597,44 +616,49 @@ class _LaneActionCallback(Callback):
             if self._state_label:
                 self._state_label.text_color = Colors.DARK_GRAY
                 self._state_label.text       = "WAITING"
-            if self._progress_label:
-                self._progress_label.text = ""
             if self._seq_label:
                 self._seq_label.text = ""
             return
 
-        lb         = protocol.snapshot.lanes[lane]
-        state      = lb.state
-        dirty      = lb.dirty
-        loop_phase = lb.loop_phase
-        seq        = protocol.snapshot.seq
+        lb    = protocol.snapshot.lanes[lane]
+        state = lb.state
+        dirty = lb.dirty
+        seq   = protocol.snapshot.seq
+
+        # Anchor dead-reckoning on every fresh snapshot (Unit A.4).
+        # _dr_phase / _dr_ts are updated unconditionally so that
+        # _get_phase() always has a valid starting point.
+        self._dr_phase = lb.loop_phase
+        self._dr_ts    = get_current_millis()
 
         if state == _STATE_RECORDING:
             state_text  = "RECORDING"
             state_color = Colors.RED
-            progress    = ""
         elif state == _STATE_OVERDUBBING:
             state_text  = "OVERDUBBING"   # verify width on hardware; fallback: "OVERDUB"
             state_color = Colors.RED
-            progress    = _make_bar(loop_phase)
         elif state == _STATE_PLAYING:
             state_text  = "PLAYING"
             state_color = Colors.LIGHT_GREEN
-            progress    = _make_bar(loop_phase)
         elif state == _STATE_STOPPED:
             state_text  = "STOPPED" if dirty else "EMPTY"
             state_color = Colors.DARK_GRAY
-            progress    = ""
         else:
             state_text  = "ERROR"
             state_color = Colors.PURPLE
-            progress    = ""
 
         if self._state_label:
             self._state_label.text_color = state_color
             self._state_label.text       = state_text
-        if self._progress_label:
-            self._progress_label.text = progress
+
+        # ── Waveform animation placeholder ────────────────────────────────────
+        # Dead-reckoning phase is available via self._get_phase(protocol, lane).
+        # Bitmap-based waveform rendering was implemented but displayio.Bitmap
+        # runtime writes do not propagate to the display in this firmware/driver
+        # combination. See docs/animation_brainstorming.md §Bitmap Display
+        # Investigation for details. Next approach: adafruit_display_shapes.Rect
+        # playhead cursor (confirmed update path).
+
         if self._seq_label:
             self._seq_label.text_color = Colors.DARK_GRAY
             self._seq_label.text       = "#" + str(seq)
