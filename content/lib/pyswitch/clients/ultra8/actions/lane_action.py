@@ -617,8 +617,8 @@ class _LaneActionCallback(Callback):
                     self.action.switch_color      = t_color
                     self.action.switch_brightness = t_brightness
                     if self.action.label:
-                        self.action.label.text       = self._resolve_corner_label()
-                        self.action.label.back_color = t_color
+                        self.action.label.text       = ""              # hide labels in tuner mode
+                        self.action.label.back_color = Colors.BLACK
                     return   # skip normal LED apply below
             except ImportError:
                 pass
