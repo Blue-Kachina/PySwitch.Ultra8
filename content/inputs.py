@@ -145,6 +145,7 @@ Inputs = [
                 drives_display = False,                 # center display owned by Switch A
                 lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_HEADER_1,
+                tuner_led_role = "flat_secondary",      # back-left: red when very flat
             ),
         ],
         "actionsHold": [
@@ -176,6 +177,7 @@ Inputs = [
                 drives_display = False,
                 lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_HEADER_2,
+                tuner_led_role = "sharp_secondary",     # back-right: red when very sharp
             ),
         ],
         "actionsHold": [
@@ -203,6 +205,7 @@ Inputs = [
                 drives_display = True,                  # owns center DISPLAY_* labels
                 lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_FOOTER_1,
+                tuner_led_role = "flat_main",           # front-left: yellow/red when flat
             ),
         ],
         "actionsHold": [
@@ -229,6 +232,7 @@ Inputs = [
                 drives_display = False,                 # center display owned by Switch A
                 lane           = DEFAULT_PAGE - 1,
                 display        = DISPLAY_FOOTER_2,
+                tuner_led_role = "sharp_main",          # front-right: yellow/red when sharp
             ),
         ],
         "actionsHold": [

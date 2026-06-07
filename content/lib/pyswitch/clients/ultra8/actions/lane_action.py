@@ -319,6 +319,7 @@ def ULTRA8_LANE_ACTION(
     use_leds       = True,
     id             = None,
     enable_callback = None,
+    tuner_led_role = None,          # Phase 7: "flat_main"|"flat_secondary"|"sharp_secondary"|"sharp_main"|None
 ):
     """
     Send a CC on press.  Drive LED and corner label from leds.json.
@@ -332,6 +333,13 @@ def ULTRA8_LANE_ACTION(
       push()               — optimistic prediction on button press
       _receive_state_update() — cross-button broadcast from another callback
       reconcile_snapshot() — authoritative correction from Ultra8 snapshot
+
+    tuner_led_role (Phase 7): when set, this button participates in the
+      tuner LED overlay.  Physical layout:
+        "flat_main"       — front-left  (Switch A): yellow/red when flat
+        "flat_secondary"  — back-left   (Switch 1): red when very flat
+        "sharp_secondary" — back-right  (Switch 2): red when very sharp
+        "sharp_main"      — front-right (Switch B): yellow/red when sharp
     """
     return Action({
         "callback": _LaneActionCallback(
@@ -342,6 +350,7 @@ def ULTRA8_LANE_ACTION(
             drives_display  = drives_display,
             lane            = lane,
             message_release = message_release,
+            tuner_led_role  = tuner_led_role,
         ),
         "display":        display,
         "useSwitchLeds":  use_leds,
@@ -361,7 +370,7 @@ class _LaneActionCallback(Callback):
             return self.__data
 
     def __init__(self, message, cc_number, label, function,
-                 drives_display, lane, message_release):
+                 drives_display, lane, message_release, tuner_led_role=None):
         super().__init__(mappings=[])
 
         self._message         = message
@@ -371,6 +380,7 @@ class _LaneActionCallback(Callback):
         self._json_function   = function        # JSON-declared function name; bound at init()
         self._drives_display  = drives_display
         self._lane_fallback   = lane
+        self._tuner_led_role  = tuner_led_role  # Phase 7: physical button role in tuner LED overlay
 
         # ── Local state machine ───────────────────────────────────────────────
         # All state changes go through _apply_state().  None until init() runs.
@@ -596,7 +606,24 @@ class _LaneActionCallback(Callback):
         if self._dynamic_function is not None:
             self._update_dynamic_led(protocol, lane)
 
-        # Apply LED to NeoPixels
+        # Phase 7: tuner LED overlay — override color when tuner is active.
+        # Checked after _update_dynamic_led() so normal state is still derived;
+        # the tuner color is only applied as the final output override.
+        if self._tuner_led_role is not None:
+            try:
+                from pyswitch.clients.ultra8 import tuner_state
+                if tuner_state.is_active():
+                    t_color, t_brightness = self._get_tuner_led_color(tuner_state)
+                    self.action.switch_color      = t_color
+                    self.action.switch_brightness = t_brightness
+                    if self.action.label:
+                        self.action.label.text       = self._resolve_corner_label()
+                        self.action.label.back_color = t_color
+                    return   # skip normal LED apply below
+            except ImportError:
+                pass
+
+        # Apply LED to NeoPixels (normal path — tuner not active)
         self.action.switch_color      = self._current_color
         self.action.switch_brightness = self._current_brightness
 
@@ -686,6 +713,64 @@ class _LaneActionCallback(Callback):
         if self._seq_label:
             self._seq_label.text_color = Colors.DARK_GRAY
             self._seq_label.text       = "#" + str(seq)
+
+    # ── Private: tuner LED overlay ────────────────────────────────────────────────
+
+    def _get_tuner_led_color(self, ts):
+        """Return (color, brightness) for this button's tuner LED role.
+
+        Mapping (tuner_implementation.md §NANO4 LED Design):
+
+          No signal  (sig < 8)           → dim white (all buttons)
+          Listening  (sig ≥ 8, conf = 0) → dim yellow (all buttons)
+          In tune    (cents ≤ 3)         → bright green (all buttons)
+          Slightly flat  (4–15c flat)    → flat_main yellow; others green
+          Very flat  (> 15c flat)        → flat_main + flat_secondary red; others off
+          Slightly sharp (4–15c sharp)   → sharp_main yellow; others green
+          Very sharp (> 15c sharp)       → sharp_main + sharp_secondary red; others off
+
+        While not in TUNER_ACTIVE (PENDING / NO_DATA / NORMAL_PENDING):
+          → dim gray on all buttons.
+        """
+        state = ts.get_state()
+
+        if state != ts.TUNER_ACTIVE:
+            return Colors.DARK_GRAY, 0.02
+
+        sig   = ts.last_signal_level or 0
+        conf  = ts.last_confidence   or 0
+
+        if sig < 8:
+            # No signal
+            return Colors.WHITE, 0.04
+
+        if conf == 0 or ts.last_note is None:
+            # Signal present but pitch not yet detected (Listening...)
+            return Colors.YELLOW, 0.08
+
+        # Pitch detected — use cents data
+        cents  = ts.last_cents_mag  or 0
+        flat   = (ts.last_cents_sign == 0)   # 0=flat, 1=sharp
+        role   = self._tuner_led_role
+
+        if cents <= 3:
+            # In tune — all green
+            return Colors.LIGHT_GREEN, 1.0
+
+        if cents <= 15:
+            # Slightly off — primary side shows yellow; others dim
+            if flat and role == "flat_main":
+                return Colors.YELLOW, 0.8
+            if (not flat) and role == "sharp_main":
+                return Colors.YELLOW, 0.8
+            return Colors.DARK_GRAY, 0.02
+
+        # Very off (> 15c) — primary and secondary on that side show red
+        if flat and role in ("flat_main", "flat_secondary"):
+            return Colors.RED, 1.0
+        if (not flat) and role in ("sharp_main", "sharp_secondary"):
+            return Colors.RED, 1.0
+        return Colors.DARK_GRAY, 0.02
 
     # ── Private: dynamic LED reassignment detection ───────────────────────────────────────────
 
