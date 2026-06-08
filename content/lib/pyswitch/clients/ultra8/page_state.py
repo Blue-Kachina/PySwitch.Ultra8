@@ -48,3 +48,12 @@ def decrement():
     global _current_page
     if _current_page > _MIN_PAGE:
         _current_page -= 1
+
+
+def cycle():
+    """Advance to the next page, wrapping from 8 back to 1."""
+    global _current_page
+    if _current_page >= _MAX_PAGE:
+        _current_page = _MIN_PAGE
+    else:
+        _current_page += 1

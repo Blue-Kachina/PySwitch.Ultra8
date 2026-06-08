@@ -34,7 +34,7 @@ from ....controller.actions import Action
 
 
 def ULTRA8_PAGE_NAV(
-    direction,                # +1 = increment page, -1 = decrement page
+    direction,                # +1 = increment page, -1 = decrement page, 0 = cycle (wrap 8→1)
     display         = None,   # DisplayLabel for corner label (normally None)
     use_leds        = False,  # LEDs owned by short-press action on the same button
     id              = None,
@@ -70,8 +70,10 @@ class _PageNavCallback(Callback):
             return
         if self.__direction > 0:
             self.__page_state.increment()
-        else:
+        elif self.__direction < 0:
             self.__page_state.decrement()
+        else:
+            self.__page_state.cycle()
         self.__appl.reset_actions()
 
     def release(self):

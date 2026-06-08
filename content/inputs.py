@@ -19,14 +19,13 @@
 #   nano4_button_maps/lane_<DEFAULT_PAGE>.json
 #
 # If the JSON file is unavailable, the fallback CC numbers below apply:
-#   Switch A  short  → CC 20  (REC/PLY)
-#   Switch A  long   → CC 26  (TUNER on/off)
+#   Switch A  press  → CC 20  (REC/PLY)   fires on press (no long press)
 #   Switch 1  short  → CC 22  (UNDO/REDO)
 #   Switch 1  long   → CC 23  (CLR)
 #   Switch 2  short  → CC 25  (REV)
-#   Switch 2  long   →        PAGE UP      (next_lane)
+#   Switch 2  long   →        PAGE CYCLE   (1→2→…→8→1)
 #   Switch B  short  → CC 24  (PLY/STP)
-#   Switch B  long   →        PAGE DOWN    (prev_lane)
+#   Switch B  long   → CC 26  (TUNER on/off)
 #
 # LED behavior:
 #   All four buttons are function-bound — their LED color and corner label
@@ -35,9 +34,11 @@
 #   The "function" key binds the LED function at init() time, so buttons
 #   show their default state immediately on boot without waiting for SysEx.
 #
-# Press behaviour: messages fire on SHORT RELEASE.  When a button has both
-# `actions` and `actionsHold`, PySwitch delays firing `actions` until the
-# press is confirmed short.  Value 127 sent on activation; no release CC.
+# Press behaviour: Switch A fires on press (push()) — no long-press
+#   disambiguation, so the CC is sent the instant the footswitch closes.
+#   Switches 1, 2, B still have both short and long actions; PySwitch delays
+#   firing `actions` on those until the press is confirmed short (on release).
+#   Value 127 sent on activation; no release CC.
 #
 ##############################################################################
 
@@ -103,25 +104,14 @@ def _btn_function(button):
 # Default values match the pre-Phase-4 hardcoded assignments.
 
 _CC_A_SHORT = _cc_index("A", "short", 20)   # REC/PLY
-# _CC_A_LONG removed: Button A long press is now ULTRA8_TUNER_ACTION (CC26), not a raw CC
+# No _CC_A_LONG: Button A has no long press (fires on push only)
 _CC_1_SHORT = _cc_index("1", "short", 22)   # UNDO/REDO
 _CC_1_LONG  = _cc_index("1", "long",  23)   # CLR
 _CC_2_SHORT = _cc_index("2", "short", 25)   # REV
 _CC_B_SHORT = _cc_index("B", "short", 24)   # PLY/STP
 
-# PAGE NAV direction from JSON internal index ("next_lane" / "prev_lane")
-# Falls back to +1 / -1 if JSON is unavailable.
-def _nav_direction(button, gesture, default_direction):
-    g = get_gesture(_config, button, gesture)
-    idx = g.get("index")
-    if idx == "next_lane":
-        return +1
-    if idx == "prev_lane":
-        return -1
-    return default_direction
-
-_DIR_2_LONG = _nav_direction("2", "long", +1)   # Switch 2 long: PAGE UP
-_DIR_B_LONG = _nav_direction("B", "long", -1)   # Switch B long: PAGE DOWN
+# Switch 2 long: PAGE CYCLE (increment with wrap 8→1, direction=0)
+_DIR_2_LONG = 0
 
 
 # ── Inputs ────────────────────────────────────────────────────────────────────
@@ -163,7 +153,7 @@ Inputs = [
 
     # ── Switch 2 (back-right) ────────────────────────────────────────────────
     # Short: REV (CC25) — function-bound LED + tier-3 label from leds.json.
-    # Long:  PAGE UP
+    # Long:  PAGE CYCLE (1→2→…→8→1, wraps)
     # LED reflects rev_active from SysEx snapshot (lit orange when reversed).
     # Hold does not own LEDs or corner label.
     {
@@ -190,10 +180,8 @@ Inputs = [
     },
 
     # ── Switch A (front-left) ────────────────────────────────────────────────
-    # Short: REC/PLY (CC20) — function-bound LED + tier-3 label + center display.
-    # Long:  TUNER (CC26) — chromatic tuner overlay; exits on second long-press
-    #        or after 30 s without tuner SysEx.
-    # Hold does not own LEDs or corner label.
+    # Press: REC/PLY (CC20) — fires on push() (no actionsHold, no disambiguation delay).
+    # Function-bound LED + tier-3 label + center display.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_A,
         "actions": [
@@ -208,18 +196,12 @@ Inputs = [
                 tuner_led_role = "flat_main",           # front-left: yellow/red when flat
             ),
         ],
-        "actionsHold": [
-            ULTRA8_TUNER_ACTION(
-                lane           = DEFAULT_PAGE - 1,
-                display        = None,    # hold does not own corner label
-                use_leds       = False,   # LEDs belong to the short-press action
-            ),
-        ],
     },
 
     # ── Switch B (front-right) ───────────────────────────────────────────────
     # Short: PLY/STP (CC24) — function-bound LED + tier-3 label.
-    # Long:  PAGE DOWN
+    # Long:  TUNER (CC26) — chromatic tuner overlay; exits on second long-press
+    #        or after 30 s without tuner SysEx.
     # Hold does not own LEDs or corner label.
     {
         "assignment": PA_MIDICAPTAIN_NANO_SWITCH_B,
@@ -236,10 +218,10 @@ Inputs = [
             ),
         ],
         "actionsHold": [
-            ULTRA8_PAGE_NAV(
-                direction      = _DIR_B_LONG,
+            ULTRA8_TUNER_ACTION(
+                lane           = DEFAULT_PAGE - 1,
                 display        = None,    # hold does not own corner label
-                use_leds       = False,   # LEDs belong to ULTRA8_LANE_ACTION
+                use_leds       = False,   # LEDs belong to the short-press action
             ),
         ],
     },
