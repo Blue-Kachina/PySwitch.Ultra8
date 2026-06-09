@@ -138,6 +138,22 @@ def receive_update(active, note, octave, cents_mag, cents_sign,
         _state_entered_ms = get_current_millis()
 
 
+def receive_snapshot_tuner_flag(tuner_enabled):
+    """Called from protocol._receive_snapshot() with the authoritative tuner_enabled
+    flag for this device's lane (bit 4 of the lane_flags byte, Phase 8).
+
+    If tuner_enabled == 0 and the state machine is not already NORMAL:
+      force_normal() immediately — Ultra8 has confirmed the tuner is off for this
+      lane, so any pending transition is resolved.
+
+    If tuner_enabled == 1: no action needed.  State advancement toward
+    TUNER_ACTIVE is driven by actual 0x04 tuner SysEx packets; the snapshot
+    flag alone is not enough to confirm a live data stream.
+    """
+    if tuner_enabled == 0 and _state != NORMAL:
+        force_normal()
+
+
 def check_timeouts(send_cc26_off_fn):
     """Check non-blocking timeouts.  Called every loop cycle from
     tuner_action.update_displays().

@@ -153,9 +153,17 @@ class _TunerActionCallback(Callback):
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _send_cc26(self, lane_zero_indexed, value):
-        """Send CC26 with `value` on the lane's MIDI channel."""
+        """Send the TUN CC with `value` on the lane's MIDI channel.
+
+        Uses the dynamically-assigned CC from the assignment store (control ID 6).
+        Falls back to CC 26 before the first assignment message is received.
+        """
+        from pyswitch.clients.ultra8 import assignments
+        cc = assignments.get_cc_for_control(6)   # 6 = TUNER control ID
+        if cc is None:
+            cc = 26   # default before first assignment message
         channel_byte = 0xB0 + (lane_zero_indexed & 0x0F)
-        self._appl.client.midi.send(self._RawMessage([channel_byte, 26, value]))
+        self._appl.client.midi.send(self._RawMessage([channel_byte, cc, value]))
 
     def _send_cc26_off(self):
         """Send CC26=0 (TUNER_OFF) and advance state machine to NORMAL_PENDING.

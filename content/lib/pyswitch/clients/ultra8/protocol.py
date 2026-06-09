@@ -28,9 +28,9 @@
 #   1. manufacturer_id  == bytes([0x7D])
 #   2. data[0]          == 0x55            (protocol ID)
 #   3. data[1]          == 0x02            (msg_type: assignment)
-#   4. len(data)        == 23              (total packet 26 bytes, 6 controls)
+#   4. len(data)        == 26              (total packet 29 bytes, 7 controls)
 #   5. seq != last accepted assignment seq (duplicate suppression)
-#   6. data[4]          == 6               (num_controls; must be 6)
+#   6. data[4]          == 7               (num_controls; must be 7)
 #   Any failure → silently discard; last accepted state is retained.
 #
 # Tuner message validation rules (tuner_implementation.md §SysEx):
@@ -58,7 +58,7 @@ _MSG_TYPE_TUNER     = 0x04            # Tuner update (Tuner Ph1)
 
 # Expected data lengths (= total packet bytes − 3 framing bytes: F0 mfr F7)
 _SNAPSHOT_DATA_LEN  = 30              # 33-byte packet
-_ASSIGN_DATA_LEN    = 23              # 26-byte packet (6 controls)
+_ASSIGN_DATA_LEN    = 26              # 29-byte packet (7 controls)
 _TIMING_DATA_LEN    = 21              # 24-byte packet (8 lanes × 2 bytes)
 _TUNER_DATA_LEN     = 13              # 16-byte packet
 
@@ -85,13 +85,14 @@ class _LaneBlock:
       bits 1:0  state           — lane state enum (0=stopped 1=playing 2=recording 3=overdubbing)
       bit  2    dirty           — 1 = lane has recorded audio
       bit  3    selected        — 1 = this is the selected lane
-      bits 5:4  reserved (monmode removed)
+      bit  4    tuner_enabled   — 1 = tuner is active for this lane (Phase 8)
+      bit  5    reserved
       bit  6    reverse         — 1 = loop is currently playing in reverse (rev_active)
       bit  7    always 0 (7-bit MIDI safety)
     """
 
     __slots__ = ("lane_index", "state", "dirty", "selected",
-                 "reverse", "undo_redo_state", "loop_phase")
+                 "reverse", "undo_redo_state", "loop_phase", "tuner_enabled")
 
     def __init__(self, lane_info, flags, loop_phase):
         self.lane_index      = lane_info & 0x07
@@ -99,14 +100,15 @@ class _LaneBlock:
         self.state           =  flags           & 0x03
         self.dirty           = (flags >> 2)     & 0x01
         self.selected        = (flags >> 3)     & 0x01
+        self.tuner_enabled   = (flags >> 4)     & 0x01   # Phase 8: tuner active for this lane
         self.reverse         = (flags >> 6)     & 0x01   # rev_active: 0=forward 1=reversed
         self.loop_phase      = loop_phase
 
     def __repr__(self):
         return (
-            "_LaneBlock(lane={} state={} dirty={} sel={} rev={} undo_redo={} phase={})".format(
+            "_LaneBlock(lane={} state={} dirty={} sel={} tuner={} rev={} undo_redo={} phase={})".format(
                 self.lane_index, self.state, self.dirty,
-                self.selected, self.reverse, self.undo_redo_state, self.loop_phase
+                self.selected, self.tuner_enabled, self.reverse, self.undo_redo_state, self.loop_phase
             )
         )
 
@@ -280,6 +282,18 @@ class Ultra8Protocol:
             if self.debug:
                 print("U8 proto [snap]: reconcile error:", exc)
 
+        # Phase 8: inform tuner_state of the authoritative tuner_enabled flag for
+        # this device's lane so it can confirm or cancel pending transitions.
+        try:
+            from . import page_state as _ps
+            from . import tuner_state as _ts
+            _lane = _ps.get() - 1
+            if 0 <= _lane < _NUM_LANES:
+                _ts.receive_snapshot_tuner_flag(self.snapshot.lanes[_lane].tuner_enabled)
+        except Exception as exc:
+            if self.debug:
+                print("U8 proto [snap]: tuner_state flag error:", exc)
+
         return True
 
     # ── Private: assignment message parser ────────────────────────────────
@@ -307,7 +321,7 @@ class Ultra8Protocol:
 
         # ── num_controls validation ───────────────────────────────────────
         num_controls = data[4]
-        if num_controls != 6:
+        if num_controls != 7:
             if self.debug:
                 print("U8 proto [assign]: unexpected num_controls", num_controls)
             return False

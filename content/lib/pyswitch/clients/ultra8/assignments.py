@@ -28,6 +28,7 @@ _NAMES = {
     3: "MON",
     4: "UNDO",
     5: "REV",
+    6: "TUN",
 }
 
 # ── Control ID → internal function name ────────────────────────────────────
@@ -40,6 +41,7 @@ _FUNCTION_NAMES = {
     3: "MON",
     4: "UNDO_REDO",
     5: "REV",
+    6: "TUNER",
 }
 
 # ── Internal function name → display label ─────────────────────────────────
@@ -51,6 +53,7 @@ _DISPLAY_LABELS = {
     "MON":       "MON",
     "UNDO_REDO": "UNDO",
     "REV":       "REV",
+    "TUNER":     "TUN",
 }
 
 # Fallback shown before the first assignment message is received.
@@ -90,6 +93,24 @@ def get_function_name(control_id):
     Returns None for unknown control IDs.
     """
     return _FUNCTION_NAMES.get(control_id)
+
+
+def get_cc_for_control(control_id):
+    """Return the CC number currently assigned to a given control ID, or None.
+
+    Returns None if the store is empty, the control is not CC-assigned
+    (MSG_TYPE_CC), or the control ID is unknown.
+
+    Used by tuner_action to send the dynamically-assigned TUN CC (control ID 6)
+    instead of a hardcoded value.
+    """
+    entry = _store.get(control_id)
+    if entry is None:
+        return None
+    msg_type, msg_number = entry
+    if msg_type == MSG_TYPE_CC:
+        return msg_number
+    return None
 
 
 def get_function_by_cc(msg_number):
