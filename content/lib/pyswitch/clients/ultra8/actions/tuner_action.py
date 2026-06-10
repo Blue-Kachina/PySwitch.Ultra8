@@ -47,6 +47,13 @@ from adafruit_midi.midi_message import MIDIMessage
 _NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 
+def _semitone_distance(key_a, key_b):
+    """Return absolute semitone distance between two (note, octave) keys."""
+    note_a, oct_a = key_a
+    note_b, oct_b = key_b
+    return abs((oct_a * 12 + note_a) - (oct_b * 12 + note_b))
+
+
 def _format_pitch(note, octave, cents_mag, cents_sign):
     """Return a short pitch string like 'E1  -7c' or 'A4  +0c'."""
     note_str  = _NOTE_NAMES[note % 12] if 0 <= note <= 11 else "?"
@@ -239,11 +246,17 @@ class _TunerActionCallback(Callback):
         """Write tuner overlay to center display labels.
 
         Note stability is enforced in two layers:
-          1. Hysteresis: a note must appear for MIN_HOLD_COUNT consecutive frames
-             at or above CONF_THRESHOLD before it is committed to the display.
+          1. Hysteresis: a note must appear for _MIN_HOLD_COUNT consecutive frames
+             at or above _CONF_THRESHOLD before it is committed to the display.
+             Adjacent notes (±1 semitone) with small cents offset are fast-accepted
+             in 1 frame — so tuning through a note boundary feels instantaneous.
           2. Lock-and-hold: once the JSFX stable flag fires (5 identical detections),
-             the displayed note is frozen.  It stays frozen until UNLOCK_FRAMES of
-             low-confidence or no-signal frames have elapsed.
+             the displayed note is frozen.  It stays frozen until _UNLOCK_FRAMES of
+             low-confidence frames have elapsed — OR until a new note has been
+             consistently reported for _MIN_HOLD_COUNT frames, whichever comes first.
+             This second condition is the key fix for the C→D tuning transition: the
+             stable lock on C breaks as soon as D appears for 2+ consecutive frames,
+             rather than waiting for the signal to drop.
 
         The DISPLAY_SEQ label shows a 12-char cents needle when a note is locked,
         or the incoming signal bar while listening (no note locked yet).
@@ -255,6 +268,7 @@ class _TunerActionCallback(Callback):
         _CONF_THRESHOLD   = 25   # min confidence to count a detection toward lock
         _MIN_HOLD_COUNT   = 2    # consecutive same-note frames before committing display
         _UNLOCK_FRAMES    = 3    # low-conf/no-signal frames required to break stable hold
+        _FAST_CENTS       = 30   # cents threshold for 1-frame fast-accept of adjacent note
 
         state = tuner_state.get_state()
 
@@ -279,9 +293,10 @@ class _TunerActionCallback(Callback):
             return
 
         # ── TUNER_ACTIVE ──────────────────────────────────────────────────────
-        sig  = tuner_state.last_signal_level or 0
-        conf = tuner_state.last_confidence   or 0
-        stbl = tuner_state.last_stable       or 0
+        sig      = tuner_state.last_signal_level or 0
+        conf     = tuner_state.last_confidence   or 0
+        stbl     = tuner_state.last_stable       or 0
+        cents_mag = tuner_state.last_cents_mag   or 0
 
         if conf >= _CONF_THRESHOLD and tuner_state.last_note is not None:
             # Valid detection: update candidate streak
@@ -297,9 +312,35 @@ class _TunerActionCallback(Callback):
                 self._locked_note  = new_key
                 self._lock_stable  = True
                 self._stable_lost  = 0
-            elif self._candidate_count >= _MIN_HOLD_COUNT and not self._lock_stable:
-                # Hysteresis satisfied: commit the note without full stability
-                self._locked_note  = new_key
+
+            elif self._lock_stable and new_key != self._locked_note:
+                # Stable lock is held from an old note, but a new note is
+                # arriving consistently.  Break the lock once MIN_HOLD_COUNT
+                # consecutive high-confidence frames of the new note are seen.
+                # This is the core fix for the "stuck on C while tuning to D"
+                # problem: the stable lock no longer persists through a tuning
+                # transition as long as the guitarist keeps playing.
+                if self._candidate_count >= _MIN_HOLD_COUNT:
+                    self._lock_stable = False
+                    self._locked_note = new_key
+
+            elif not self._lock_stable:
+                # No stable lock.  Commit the new note based on hold count.
+                # Fast-accept: if the new note is exactly ±1 semitone away and
+                # its cents reading is small (pitch near the note's centre),
+                # accept it in 1 frame — makes the C→D moment feel instant once
+                # the pitch settles near D rather than right at the boundary.
+                if new_key != self._locked_note:
+                    adjacent = (
+                        self._locked_note is not None
+                        and _semitone_distance(self._locked_note, new_key) == 1
+                        and cents_mag <= _FAST_CENTS
+                    )
+                    hold = 1 if adjacent else _MIN_HOLD_COUNT
+                    if self._candidate_count >= hold:
+                        self._locked_note = new_key
+                # same note as locked — no hold needed, just keep it
+
             self._stable_lost = 0  # conf is good, reset unlock counter
 
         else:
