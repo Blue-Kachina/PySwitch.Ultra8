@@ -273,9 +273,10 @@ class _TunerActionCallback(Callback):
         if anim:
             anim.hide()
         self._anim_active = False
-        # Invalidate gate so the next _set_state_label write goes through
+        # Invalidate gates so the next label writes go through after un-hiding
         self._last_state_text  = None
         self._last_state_color = None
+        self._last_seq_text    = None
 
     def _update_anim(self, tuner_state):
         """Show/hide the graphical animation based on whether a note is locked.
@@ -308,17 +309,13 @@ class _TunerActionCallback(Callback):
             anim.show()
             self._anim_active = True
 
-        anim.update(cents_mag, cents_sign)
-
-        # DISPLAY_SEQ: note name + cents as readable text
         note, octave = self._locked_note
-        note_str  = _NOTE_NAMES[note % 12] if 0 <= note <= 11 else "?"
-        sign_char = "+" if cents_sign == 1 else "-"
-        seq_text  = "{}{}  {}{}c".format(note_str, octave, sign_char, cents_mag)
-        if self._seq_label and seq_text != self._last_seq_text:
-            self._seq_label.text       = seq_text
-            self._seq_label.text_color = Colors.GREEN if self._lock_stable else Colors.WHITE
-            self._last_seq_text        = seq_text
+        note_str = _NOTE_NAMES[note % 12] if 0 <= note <= 11 else "?"
+        octave_str = str(octave) if octave is not None else ""
+        anim.update(cents_mag, cents_sign, note_str + octave_str)
+
+        # Blank DISPLAY_SEQ — the note_label inside TunerAnimDisplay owns that area
+        self._set_seq_label("")
 
     # ── Main display update ───────────────────────────────────────────────────────────────────────────
 

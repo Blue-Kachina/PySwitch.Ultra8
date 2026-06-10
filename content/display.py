@@ -228,12 +228,16 @@ Splashes = SplashesCallback(
             # Snapshot sequence counter — updated live by lane_action.py
             DISPLAY_SEQ,
 
-            # Tuner animation shapes — hidden by default; shown by tuner_action.py
+            # Tuner animation elements — hidden by default; shown by tuner_action.py
             # when TUNER_ACTIVE with a locked note.  Rendered on top of text labels
             # because they are last in the children list.
-            _GroupElement(TUNER_ANIM.shapes[0]),   # line  (Rect)
-            _GroupElement(TUNER_ANIM.shapes[1]),   # ring  (Circle, fixed)
-            _GroupElement(TUNER_ANIM.shapes[2]),   # ball  (Circle, moves)
+            # Shapes are raw displayio.Group subclasses — wrapped in _GroupElement.
+            # note_label is a DisplayLabel (DisplayElement) — added directly.
+            _GroupElement(TUNER_ANIM.shapes[0]),   # line        (Rect)
+            _GroupElement(TUNER_ANIM.shapes[1]),   # ring        (Circle, fixed)
+            _GroupElement(TUNER_ANIM.shapes[2]),   # ball_white  (Circle, out of tune)
+            _GroupElement(TUNER_ANIM.shapes[3]),   # ball_green  (Circle, in tune)
+            TUNER_ANIM.note_label,                 # note name   (PTSans-NarrowBold-40)
         ],
     )
 )

@@ -606,18 +606,19 @@ class _LaneActionCallback(Callback):
         if self._dynamic_function is not None:
             self._update_dynamic_led(protocol, lane)
 
-        # Phase 7: tuner LED overlay — override color when tuner is active.
-        # Checked after _update_dynamic_led() so normal state is still derived;
-        # the tuner color is only applied as the final output override.
+        # Tuner LED override — static dim state while tuner is active.
+        # Labels are cleared and LEDs hold dim gray for the duration of tuner
+        # mode.  No flat/sharp/confidence animation; the TFT display handles
+        # all tuner feedback.  Re-enable dynamic LED animation by replacing
+        # the static color assignment with _get_tuner_led_color(tuner_state).
         if self._tuner_led_role is not None:
             try:
                 from pyswitch.clients.ultra8 import tuner_state
                 if tuner_state.is_active():
-                    t_color, t_brightness = self._get_tuner_led_color(tuner_state)
-                    self.action.switch_color      = t_color
-                    self.action.switch_brightness = t_brightness
+                    self.action.switch_color      = Colors.DARK_GRAY
+                    self.action.switch_brightness = 0.02
                     if self.action.label:
-                        self.action.label.text       = ""              # hide labels in tuner mode
+                        self.action.label.text       = ""
                         self.action.label.back_color = Colors.BLACK
                     return   # skip normal LED apply below
             except ImportError:
