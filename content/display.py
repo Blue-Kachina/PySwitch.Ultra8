@@ -46,6 +46,25 @@ from pyswitch.ui.ui import DisplayElement, DisplayBounds
 from pyswitch.ui.elements import DisplayLabel
 from pyswitch.clients.local.callbacks.splashes import SplashesCallback
 from pyswitch.clients.ultra8.lane_config import load_default_lane as _load_default_lane
+from pyswitch.clients.ultra8.tuner_display import TunerAnimDisplay
+
+
+class _GroupElement(DisplayElement):
+    """Thin DisplayElement wrapper for a raw displayio.Group (or subclass).
+
+    adafruit_display_shapes objects (Rect, Circle, etc.) subclass displayio.Group
+    but do not implement the PySwitch init(ui, appl) / initialized() lifecycle.
+    This wrapper appends the group to ui.splash during init() so the framework
+    can iterate the Splashes children list safely.
+    """
+
+    def __init__(self, group):
+        super().__init__()
+        self._group = group
+
+    def init(self, ui, appl):
+        ui.splash.append(self._group)
+        super().init(ui, appl)
 
 
 class _TileGridElement(DisplayElement):
@@ -71,6 +90,13 @@ class _TileGridElement(DisplayElement):
         ui.splash.append(wrapper)
         super().init(ui, appl)
 DEFAULT_PAGE = _load_default_lane()   # initial lane for DISPLAY_LANE text
+
+# ── Tuner animation shapes ─────────────────────────────────────────────────────
+#
+# TunerAnimDisplay owns the line/ring/ball shapes for the graphical tuner
+# overlay.  Shapes start hidden; tuner_action.py calls show()/hide()/update().
+#
+TUNER_ANIM = TunerAnimDisplay()
 
 # ── Dimensions ───────────────────────────────────────────────────────────────
 
@@ -201,6 +227,13 @@ Splashes = SplashesCallback(
 
             # Snapshot sequence counter — updated live by lane_action.py
             DISPLAY_SEQ,
+
+            # Tuner animation shapes — hidden by default; shown by tuner_action.py
+            # when TUNER_ACTIVE with a locked note.  Rendered on top of text labels
+            # because they are last in the children list.
+            _GroupElement(TUNER_ANIM.shapes[0]),   # line  (Rect)
+            _GroupElement(TUNER_ANIM.shapes[1]),   # ring  (Circle, fixed)
+            _GroupElement(TUNER_ANIM.shapes[2]),   # ball  (Circle, moves)
         ],
     )
 )

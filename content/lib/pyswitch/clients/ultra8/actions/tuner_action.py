@@ -6,7 +6,7 @@
 #
 # Button A long press handler for the chromatic tuner overlay.
 #
-# ── Behaviour ────────────────────────────────────────────────────────────────
+# ── Behaviour ──────────────────────────────────────────────────────────────────────────────
 #
 #   push() (fires on long-press release):
 #     If tuner is NOT active: send CC26=127 (TUNER_ON) and call
@@ -23,14 +23,23 @@
 #     ③ When not active: writes nothing (center display is owned by the
 #       short-press lane_action for button A).
 #
-# ── Center display content ───────────────────────────────────────────────────
+# ── Center display content ───────────────────────────────────────────────────────────────────────
 #
 #   DISPLAY_LANE  → "TUNER"
 #   DISPLAY_STATE → note + octave + cents, e.g. "E1  -7c"
 #                   or "WAITING..." (TUNER_PENDING) / "NO DATA" (TUNER_NO_DATA)
-#   DISPLAY_SEQ   → confidence indicator, e.g. "conf:104" or blank
+#                   Cleared to "" when the graphical animation overlay is active.
+#   DISPLAY_SEQ   → when animation active: "E1  -7c" note+cents text
+#                   when animation hidden: 12-char ASCII needle or signal bar
 #
-# ── LED / label ownership ────────────────────────────────────────────────────
+# ── Graphical animation overlay ───────────────────────────────────────────────────────
+#
+#   When TUNER_ACTIVE and a note is locked, TUNER_ANIM (from display.py)
+#   shows a horizontal line with a moving ball that encodes cents deviation.
+#   DISPLAY_STATE is blanked so it does not show behind the shapes.
+#   DISPLAY_SEQ shows the note name + cents as readable text below.
+#
+# ── LED / label ownership ──────────────────────────────────────────────────────────────────────────
 #
 #   inputs.py wires this action with use_leds=False, display=None
 #   (same as all other hold actions).  LED and corner label are owned by
@@ -58,11 +67,11 @@ def _format_pitch(note, octave, cents_mag, cents_sign):
     """Return a short pitch string like 'E1  -7c' or 'A4  +0c'."""
     note_str  = _NOTE_NAMES[note % 12] if 0 <= note <= 11 else "?"
     sign_char = "-" if cents_sign == 0 else "+"
-    return "{}{:<2}  {}{}c".format(note_str, octave, sign_char, cents_mag)
+    return "{}{}  {}{}c".format(note_str, octave, sign_char, cents_mag)
 
 
 def _format_needle(cents_mag, cents_sign):
-    """Return a 12-char cents needle like '[----<----]' or '[-----|--->]'.
+    """Return a 12-char cents needle like '[----<----]' or '[-----|--->'.
 
     10-character inner field, center position 5.
     Flat  (cents_sign=0): marker '<' moves left of center.
@@ -82,7 +91,7 @@ def _format_needle(cents_mag, cents_sign):
     return "[" + inner + "]"
 
 
-# ── Public factory ────────────────────────────────────────────────────────────
+# ── Public factory ──────────────────────────────────────────────────────────────────────────────
 
 def ULTRA8_TUNER_ACTION(
     lane           = 0,         # Boot-default lane index (0-indexed)
@@ -106,7 +115,7 @@ def ULTRA8_TUNER_ACTION(
     })
 
 
-# ── Internal callback ─────────────────────────────────────────────────────────
+# ── Internal callback ─────────────────────────────────────────────────────────────────────────────
 
 class _TunerActionCallback(Callback):
 
@@ -125,7 +134,7 @@ class _TunerActionCallback(Callback):
         self._state_label   = None   # DISPLAY_STATE
         self._seq_label     = None   # DISPLAY_SEQ
 
-        # ── Note hysteresis / lock-and-hold state ─────────────────────────────
+        # ── Note hysteresis / lock-and-hold state ─────────────────────────────────────────────────────
         # Candidate tracking: gate note display until 2 consecutive matching frames.
         self._candidate_note  = None   # (note, octave) being evaluated
         self._candidate_count = 0      # consecutive same-note frames at conf >= 25
@@ -140,7 +149,10 @@ class _TunerActionCallback(Callback):
         self._last_state_color = None
         self._last_seq_text    = None
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+        # Animation state — tracks whether TUNER_ANIM is currently shown
+        self._anim_active = False
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────────────────────
 
     def init(self, appl, listener=None):
         self._appl = appl
@@ -160,7 +172,7 @@ class _TunerActionCallback(Callback):
         except (ImportError, AttributeError):
             pass   # running without display (tests / emulator)
 
-    # ── Button press ──────────────────────────────────────────────────────────
+    # ── Button press ──────────────────────────────────────────────────────────────────────────────
 
     def push(self):
         from pyswitch.clients.ultra8 import tuner_state
@@ -177,7 +189,7 @@ class _TunerActionCallback(Callback):
     def release(self):
         pass   # no release action for tuner
 
-    # ── Periodic update ───────────────────────────────────────────────────────
+    # ── Periodic update ───────────────────────────────────────────────────────────────────────────
 
     def update(self):
         super().update()
@@ -193,7 +205,7 @@ class _TunerActionCallback(Callback):
         if tuner_state.is_active():
             self._update_tuner_display(tuner_state)
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    # ── Private helpers ─────────────────────────────────────────────────────────────────────────────
 
     def _send_cc26(self, lane_zero_indexed, value):
         """Send the TUN CC with `value` on the lane's MIDI channel.
@@ -241,6 +253,74 @@ class _TunerActionCallback(Callback):
         self._locked_note     = None
         self._lock_stable     = False
         self._stable_lost     = 0
+        self._hide_anim()
+
+    # ── Graphical animation ───────────────────────────────────────────────────────────────────────────
+
+    def _get_tuner_anim(self):
+        """Return the TUNER_ANIM instance from display.py, or None."""
+        try:
+            from display import TUNER_ANIM
+            return TUNER_ANIM
+        except (ImportError, AttributeError):
+            return None
+
+    def _hide_anim(self):
+        """Hide the graphical overlay and invalidate the state-label delta gate."""
+        if not self._anim_active:
+            return
+        anim = self._get_tuner_anim()
+        if anim:
+            anim.hide()
+        self._anim_active = False
+        # Invalidate gate so the next _set_state_label write goes through
+        self._last_state_text  = None
+        self._last_state_color = None
+
+    def _update_anim(self, tuner_state):
+        """Show/hide the graphical animation based on whether a note is locked.
+
+        When locked (TUNER_ACTIVE with _locked_note set):
+          - DISPLAY_STATE is cleared (blank area behind the shapes).
+          - DISPLAY_SEQ shows "E1  -7c" note+cents text below the shapes.
+          - The line/ring/ball are shown and the ball is repositioned.
+
+        When not locked:
+          - Shapes are hidden; DISPLAY_STATE/DISPLAY_SEQ revert to text tuner.
+        """
+        if self._locked_note is None:
+            self._hide_anim()
+            return
+
+        anim = self._get_tuner_anim()
+        if anim is None:
+            return
+
+        cents_mag  = tuner_state.last_cents_mag  or 0
+        lcs = tuner_state.last_cents_sign
+        cents_sign = lcs if lcs is not None else 1
+
+        # Blank DISPLAY_STATE so it does not show behind the shapes
+        self._set_state_label("", Colors.DARK_GRAY)
+
+        # Show shapes and reposition ball
+        if not self._anim_active:
+            anim.show()
+            self._anim_active = True
+
+        anim.update(cents_mag, cents_sign)
+
+        # DISPLAY_SEQ: note name + cents as readable text
+        note, octave = self._locked_note
+        note_str  = _NOTE_NAMES[note % 12] if 0 <= note <= 11 else "?"
+        sign_char = "+" if cents_sign == 1 else "-"
+        seq_text  = "{}{}  {}{}c".format(note_str, octave, sign_char, cents_mag)
+        if self._seq_label and seq_text != self._last_seq_text:
+            self._seq_label.text       = seq_text
+            self._seq_label.text_color = Colors.GREEN if self._lock_stable else Colors.WHITE
+            self._last_seq_text        = seq_text
+
+    # ── Main display update ───────────────────────────────────────────────────────────────────────────
 
     def _update_tuner_display(self, tuner_state):
         """Write tuner overlay to center display labels.
@@ -248,23 +328,24 @@ class _TunerActionCallback(Callback):
         Note stability is enforced in two layers:
           1. Hysteresis: a note must appear for _MIN_HOLD_COUNT consecutive frames
              at or above _CONF_THRESHOLD before it is committed to the display.
-             Adjacent notes (±1 semitone) with small cents offset are fast-accepted
-             in 1 frame — so tuning through a note boundary feels instantaneous.
+             Adjacent notes (+/-1 semitone) with small cents offset are fast-accepted
+             in 1 frame -- so tuning through a note boundary feels instantaneous.
           2. Lock-and-hold: once the JSFX stable flag fires (5 identical detections),
              the displayed note is frozen.  It stays frozen until _UNLOCK_FRAMES of
-             low-confidence frames have elapsed — OR until a new note has been
+             low-confidence frames have elapsed -- OR until a new note has been
              consistently reported for _MIN_HOLD_COUNT frames, whichever comes first.
-             This second condition is the key fix for the C→D tuning transition: the
+             This second condition is the key fix for the C->D tuning transition: the
              stable lock on C breaks as soon as D appears for 2+ consecutive frames,
              rather than waiting for the signal to drop.
 
-        The DISPLAY_SEQ label shows a 12-char cents needle when a note is locked,
-        or the incoming signal bar while listening (no note locked yet).
+        The DISPLAY_SEQ label shows a 12-char cents needle when a note is locked
+        (and animation is hidden), or the incoming signal bar while listening.
+        When the graphical animation is active, DISPLAY_SEQ shows note+cents text.
 
-        All label writes are delta-gated — the TFT is only touched when the
+        All label writes are delta-gated -- the TFT is only touched when the
         displayed value actually changes.
         """
-        _SIGNAL_THRESHOLD = 8    # 0-127; below this → "No signal"
+        _SIGNAL_THRESHOLD = 8    # 0-127; below this -> "No signal"
         _CONF_THRESHOLD   = 25   # min confidence to count a detection toward lock
         _MIN_HOLD_COUNT   = 2    # consecutive same-note frames before committing display
         _UNLOCK_FRAMES    = 3    # low-conf/no-signal frames required to break stable hold
@@ -272,11 +353,11 @@ class _TunerActionCallback(Callback):
 
         state = tuner_state.get_state()
 
-        # ── Lane header ───────────────────────────────────────────────────────
+        # ── Lane header ─────────────────────────────────────────────────────────────────────────────────
         if self._lane_label and self._lane_label.text != "TUNER":
             self._lane_label.text = "TUNER"
 
-        # ── Non-active states ─────────────────────────────────────────────────
+        # ── Non-active states ─────────────────────────────────────────────────────────────────────────────
         if state == tuner_state.TUNER_PENDING:
             self._reset_tuner_display_state()
             self._set_state_label("WAITING...", Colors.DARK_GRAY)
@@ -292,7 +373,7 @@ class _TunerActionCallback(Callback):
             self._set_seq_label("")
             return
 
-        # ── TUNER_ACTIVE ──────────────────────────────────────────────────────
+        # ── TUNER_ACTIVE ──────────────────────────────────────────────────────────────────────────────────
         sig      = tuner_state.last_signal_level or 0
         conf     = tuner_state.last_confidence   or 0
         stbl     = tuner_state.last_stable       or 0
@@ -326,10 +407,11 @@ class _TunerActionCallback(Callback):
 
             elif not self._lock_stable:
                 # No stable lock.  Commit the new note based on hold count.
-                # Fast-accept: if the new note is exactly ±1 semitone away and
-                # its cents reading is small (pitch near the note's centre),
-                # accept it in 1 frame — makes the C→D moment feel instant once
-                # the pitch settles near D rather than right at the boundary.
+                # Fast-accept: if the new note is exactly +/-1 semitone away
+                # and its cents reading is small (pitch near the note centre),
+                # accept it in 1 frame -- makes the C->D moment feel instant
+                # once the pitch settles near D rather than right at the
+                # boundary.
                 if new_key != self._locked_note:
                     adjacent = (
                         self._locked_note is not None
@@ -339,7 +421,7 @@ class _TunerActionCallback(Callback):
                     hold = 1 if adjacent else _MIN_HOLD_COUNT
                     if self._candidate_count >= hold:
                         self._locked_note = new_key
-                # same note as locked — no hold needed, just keep it
+                # same note as locked -- no hold needed, just keep it
 
             self._stable_lost = 0  # conf is good, reset unlock counter
 
@@ -353,33 +435,26 @@ class _TunerActionCallback(Callback):
                     self._lock_stable = False
                     self._locked_note = None
             elif sig < _SIGNAL_THRESHOLD:
-                # No signal at all — clear uncommitted note
+                # No signal at all -- clear uncommitted note
                 self._locked_note = None
 
-        # ── Render state label ────────────────────────────────────────────────
-        if self._locked_note is not None:
-            note, octave = self._locked_note
-            pitch_text  = _format_pitch(
-                note, octave,
-                tuner_state.last_cents_mag  or 0,
-                tuner_state.last_cents_sign or 1,
-            )
-            note_color = Colors.GREEN if self._lock_stable else Colors.WHITE
-            self._set_state_label(pitch_text, note_color)
-        elif sig >= _SIGNAL_THRESHOLD:
-            self._set_state_label("Listening...", Colors.YELLOW)
-        else:
-            self._set_state_label("No signal", Colors.DARK_GRAY)
+        # ── Render labels (animation-off path) ────────────────────────────────────
+        # When a note is locked, _update_anim() owns DISPLAY_STATE and
+        # DISPLAY_SEQ entirely.  Writing here too causes competing writes
+        # and per-frame flicker on the TFT.
+        if self._locked_note is None:
+            if sig >= _SIGNAL_THRESHOLD:
+                self._set_state_label("Listening...", Colors.YELLOW)
+            else:
+                self._set_state_label("No signal", Colors.DARK_GRAY)
+            if sig > 0:
+                filled = max(0, min(10, sig * 10 // 127))
+                self._set_seq_label("[{}{}]".format("#" * filled, "-" * (10 - filled)))
+            else:
+                self._set_seq_label("")
 
-        # ── Render seq label: needle (locked) or signal bar (unlocked) ────────
-        if self._locked_note is not None:
-            needle = _format_needle(
-                tuner_state.last_cents_mag  or 0,
-                tuner_state.last_cents_sign or 1,
-            )
-            self._set_seq_label(needle)
-        elif sig > 0:
-            filled = max(0, min(10, sig * 10 // 127))
-            self._set_seq_label("[{}{}]".format("#" * filled, "-" * (10 - filled)))
-        else:
-            self._set_seq_label("")
+        # ── Graphical animation overlay ─────────────────────────────────────────────
+        # Locked: clears DISPLAY_STATE, writes note+cents to DISPLAY_SEQ,
+        # shows/positions animation shapes.
+        # Unlocked: hides shapes, invalidates the state-label delta gate.
+        self._update_anim(tuner_state)
