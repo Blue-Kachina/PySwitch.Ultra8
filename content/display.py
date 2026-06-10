@@ -47,6 +47,7 @@ from pyswitch.ui.elements import DisplayLabel
 from pyswitch.clients.local.callbacks.splashes import SplashesCallback
 from pyswitch.clients.ultra8.lane_config import load_default_lane as _load_default_lane
 from pyswitch.clients.ultra8.tuner_display import TunerAnimDisplay
+from pyswitch.clients.ultra8.progress_bar import ProgressBarDisplay
 
 
 class _GroupElement(DisplayElement):
@@ -97,6 +98,14 @@ DEFAULT_PAGE = _load_default_lane()   # initial lane for DISPLAY_LANE text
 # overlay.  Shapes start hidden; tuner_action.py calls show()/hide()/update().
 #
 TUNER_ANIM = TunerAnimDisplay()
+
+# -- Progress bar -----------------------------------------------------------
+#
+# ProgressBarDisplay owns the colored bar + black mask Rects for the loop
+# progress indicator.  Shapes start hidden; lane_action.py calls
+# update(phase, is_green) / hide() each display cycle.
+#
+PROGRESS_BAR = ProgressBarDisplay()
 
 # ── Dimensions ───────────────────────────────────────────────────────────────
 
@@ -227,6 +236,13 @@ Splashes = SplashesCallback(
 
             # Snapshot sequence counter — updated live by lane_action.py
             DISPLAY_SEQ,
+
+            # Progress bar shapes (colored bar + black mask).
+            # bar_green and bar_red sit below; mask slides right to reveal progress.
+            # Must appear before tuner elements so tuner renders on top.
+            _GroupElement(PROGRESS_BAR.shapes[0]),   # bar_green
+            _GroupElement(PROGRESS_BAR.shapes[1]),   # bar_red
+            _GroupElement(PROGRESS_BAR.shapes[2]),   # mask
 
             # Tuner animation elements — hidden by default; shown by tuner_action.py
             # when TUNER_ACTIVE with a locked note.  Rendered on top of text labels

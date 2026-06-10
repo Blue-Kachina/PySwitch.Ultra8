@@ -400,8 +400,13 @@ class _LaneActionCallback(Callback):
         self._dynamic_leds = None               # nested dict from leds.json
 
         # ── Dead-reckoning state (Unit A.4) ──────────────────────────────────────
-        self._dr_phase = 0                  # loop_phase from last accepted snapshot
-        self._dr_ts    = 0                  # get_current_millis() at that snapshot
+        self._dr_phase    = 0               # loop_phase from last accepted snapshot
+        self._dr_ts       = 0               # get_current_millis() at that snapshot
+        self._dr_last_seq = None            # snapshot seq at last DR anchor; None = never anchored
+        self._dr_period   = 0               # estimated loop period in ms; 0 = unknown
+
+        # ── Progress bar ref (set in init()) ─────────────────────────────────
+        self._progress_bar   = None             # PROGRESS_BAR from display.py
 
         # ── Center-display label refs (set in init()) ─────────────────────────
         self._lane_label     = None             # DISPLAY_LANE:     "Lane N"
@@ -416,10 +421,11 @@ class _LaneActionCallback(Callback):
 
         # Late-import center-display labels (display.py loads after communication.py)
         try:
-            from display import DISPLAY_LANE, DISPLAY_STATE, DISPLAY_SEQ
+            from display import DISPLAY_LANE, DISPLAY_STATE, DISPLAY_SEQ, PROGRESS_BAR
             self._lane_label    = DISPLAY_LANE
             self._state_label   = DISPLAY_STATE
             self._seq_label     = DISPLAY_SEQ
+            self._progress_bar  = PROGRESS_BAR
         except (ImportError, AttributeError):
             pass   # running without display (tests, emulator)
 
@@ -645,9 +651,11 @@ class _LaneActionCallback(Callback):
         """
         period_ms = protocol.lane_periods[lane] if hasattr(protocol, 'lane_periods') else 0
         if period_ms <= 0:
-            return self._dr_phase
+            period_ms = self._dr_period   # locally estimated fallback (from consecutive snapshots)
+        if period_ms <= 0:
+            return self._dr_phase         # period still unknown; return raw snapshot phase
         elapsed = get_current_millis() - self._dr_ts
-        return int(self._dr_phase + elapsed / period_ms * 127) % 128
+        return int(self._dr_phase + elapsed * 127 // period_ms) % 128
 
     # ── Private: center display ───────────────────────────────────────────────
 
@@ -657,6 +665,8 @@ class _LaneActionCallback(Callback):
         try:
             from pyswitch.clients.ultra8 import tuner_state
             if tuner_state.is_active():
+                if self._progress_bar:
+                    self._progress_bar.hide()
                 return
         except ImportError:
             pass
@@ -665,6 +675,8 @@ class _LaneActionCallback(Callback):
             self._lane_label.text = "Lane " + str(lane + 1)
 
         if protocol.snapshot is None:
+            if self._progress_bar:
+                self._progress_bar.hide()
             if self._state_label:
                 self._state_label.text_color = Colors.DARK_GRAY
                 self._state_label.text       = "WAITING"
@@ -677,11 +689,22 @@ class _LaneActionCallback(Callback):
         dirty = lb.dirty
         seq   = protocol.snapshot.seq
 
-        # Anchor dead-reckoning on every fresh snapshot (Unit A.4).
-        # _dr_phase / _dr_ts are updated unconditionally so that
-        # _get_phase() always has a valid starting point.
-        self._dr_phase = lb.loop_phase
-        self._dr_ts    = get_current_millis()
+        # Anchor dead-reckoning on each NEW snapshot (Unit A.4).
+        # Gated by seq so repeated calls between 1 Hz pulses do NOT reset
+        # _dr_ts -- resetting it every frame makes elapsed always ~0 and
+        # prevents _get_phase() from extrapolating between pulses.
+        now = get_current_millis()
+        if seq != self._dr_last_seq:
+            if self._dr_last_seq is not None and self._dr_ts > 0:
+                # Estimate loop period from phase progression between snapshots.
+                # Fallback for when msg_type 0x03 timing messages are not sent.
+                elapsed_ms  = now - self._dr_ts
+                phase_delta = (lb.loop_phase - self._dr_phase) % 128
+                if phase_delta > 0:
+                    self._dr_period = elapsed_ms * 127 // phase_delta
+            self._dr_phase    = lb.loop_phase
+            self._dr_ts       = now
+            self._dr_last_seq = seq
 
         if state == _STATE_RECORDING:
             state_text  = "RECORDING"
@@ -702,6 +725,18 @@ class _LaneActionCallback(Callback):
         if self._state_label:
             self._state_label.text_color = state_color
             self._state_label.text       = state_text
+
+        # ── Loop progress bar ─────────────────────────────────────────────────
+        # Visible during PLAYING (green) and OVERDUBBING (red) only.
+        # Dead-reckoning phase advances between snapshots for smooth motion.
+        if self._progress_bar:
+            if state in (_STATE_PLAYING, _STATE_OVERDUBBING):
+                self._progress_bar.update(
+                    phase    = self._get_phase(protocol, lane),
+                    is_green = (state == _STATE_PLAYING),
+                )
+            else:
+                self._progress_bar.hide()
 
         # ── Waveform animation placeholder ────────────────────────────────────
         # Dead-reckoning phase is available via self._get_phase(protocol, lane).
