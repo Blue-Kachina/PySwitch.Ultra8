@@ -657,6 +657,25 @@ class _LaneActionCallback(Callback):
         elapsed = get_current_millis() - self._dr_ts
         return int(self._dr_phase + elapsed * 127 // period_ms) % 128
 
+    def _has_loop_confidence(self, protocol, lane):
+        """True once both loop length and current position are trustworthy.
+
+        Length: either Ultra8 has sent authoritative timing metadata
+        (msg_type 0x03 → protocol.lane_periods[lane] > 0), or two consecutive
+        snapshots taken *while actively playing back* let us derive a local
+        period estimate (self._dr_period > 0).
+
+        Position: dead-reckoning is only anchored while state is PLAYING or
+        OVERDUBBING (see _update_center_display), so a non-zero period here
+        always coincides with a fresh position anchor from this playback
+        session — never a stale value carried over from a prior recording or
+        stop.
+        """
+        period_ms = protocol.lane_periods[lane] if hasattr(protocol, 'lane_periods') else 0
+        if period_ms > 0:
+            return True
+        return self._dr_period > 0
+
     # ── Private: center display ───────────────────────────────────────────────
 
     def _update_center_display(self, protocol, lane):
@@ -689,22 +708,35 @@ class _LaneActionCallback(Callback):
         dirty = lb.dirty
         seq   = protocol.snapshot.seq
 
-        # Anchor dead-reckoning on each NEW snapshot (Unit A.4).
+        # Anchor dead-reckoning on each NEW snapshot (Unit A.4), but only while
+        # actively playing back. RECORDING/STOPPED loop_phase values don't
+        # represent a loop position yet, so anchoring across, e.g., a
+        # RECORDING→PLAYING boundary produced a garbage period estimate and
+        # made the progress bar appear with a bogus length/position. Leaving
+        # active playback drops any anchor/estimate so the next playback
+        # session has to re-earn confidence rather than inherit stale values.
+        #
         # Gated by seq so repeated calls between 1 Hz pulses do NOT reset
         # _dr_ts -- resetting it every frame makes elapsed always ~0 and
         # prevents _get_phase() from extrapolating between pulses.
         now = get_current_millis()
-        if seq != self._dr_last_seq:
-            if self._dr_last_seq is not None and self._dr_ts > 0:
-                # Estimate loop period from phase progression between snapshots.
-                # Fallback for when msg_type 0x03 timing messages are not sent.
-                elapsed_ms  = now - self._dr_ts
-                phase_delta = (lb.loop_phase - self._dr_phase) % 128
-                if phase_delta > 0:
-                    self._dr_period = elapsed_ms * 127 // phase_delta
-            self._dr_phase    = lb.loop_phase
-            self._dr_ts       = now
-            self._dr_last_seq = seq
+        if state in (_STATE_PLAYING, _STATE_OVERDUBBING):
+            if seq != self._dr_last_seq:
+                if self._dr_last_seq is not None and self._dr_ts > 0:
+                    # Estimate loop period from phase progression between snapshots.
+                    # Fallback for when msg_type 0x03 timing messages are not sent.
+                    elapsed_ms  = now - self._dr_ts
+                    phase_delta = (lb.loop_phase - self._dr_phase) % 128
+                    if phase_delta > 0:
+                        self._dr_period = elapsed_ms * 127 // phase_delta
+                self._dr_phase    = lb.loop_phase
+                self._dr_ts       = now
+                self._dr_last_seq = seq
+        else:
+            self._dr_phase    = 0
+            self._dr_ts       = 0
+            self._dr_last_seq = None
+            self._dr_period   = 0
 
         if state == _STATE_RECORDING:
             state_text  = "RECORDING"
@@ -727,10 +759,13 @@ class _LaneActionCallback(Callback):
             self._state_label.text       = state_text
 
         # ── Loop progress bar ─────────────────────────────────────────────────
-        # Visible during PLAYING (green) and OVERDUBBING (red) only.
+        # Visible during PLAYING (green) and OVERDUBBING (red), and only once
+        # we have high confidence in both loop length and current position
+        # (see _has_loop_confidence). Otherwise it stays hidden rather than
+        # showing a bar built on a guessed/zero length or a stale position.
         # Dead-reckoning phase advances between snapshots for smooth motion.
         if self._progress_bar:
-            if state in (_STATE_PLAYING, _STATE_OVERDUBBING):
+            if state in (_STATE_PLAYING, _STATE_OVERDUBBING) and self._has_loop_confidence(protocol, lane):
                 self._progress_bar.update(
                     phase    = self._get_phase(protocol, lane),
                     is_green = (state == _STATE_PLAYING),
